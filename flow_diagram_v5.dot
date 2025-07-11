@@ -1,0 +1,114 @@
+digraph SpeakerPreferenceAI_v5 {
+    // General Graph Configuration
+    graph [
+        rankdir="TB",
+        fontname="Helvetica",
+        fontsize=16,
+        splines=polyline,
+        nodesep=0.8,
+        ranksep=1.5,
+        compound=true, // IMPORTANT for cluster-to-cluster edges
+        label="Detailed Technical Flow Diagram for Speaker Preference AI (v5)"
+    ];
+    node [
+        shape=record,
+        style="filled,rounded",
+        fillcolor="#ffffff",
+        fontname="Helvetica",
+        fontsize=10,
+        penwidth=1.5
+    ];
+    edge [
+        fontname="Helvetica",
+        fontsize=8,
+        penwidth=1.0,
+        color="#333333"
+    ];
+
+    // Define Main Components (Clusters)
+    subgraph cluster_data_source {
+        label="Data Sources";
+        style="filled,rounded";
+        fillcolor="#e6f7ff";
+        node [fillcolor="#ffffff"];
+        speakers_csv [label="{speakersdata.csv | Speaker profiles, bio, etc.}"];
+        topics_csv [label="{speakertopics.csv | Speaker-to-topic mappings}"];
+    }
+
+    subgraph cluster_initialization {
+        label="System Initialization (One-Time Process)";
+        style="filled,rounded";
+        fillcolor="#e6fffb";
+        node [fillcolor="#ffffff"];
+        
+        data_processor [label="{SpeakerDataProcessor | - create_speaker_profiles()\l- create_searchable_text()\l}"];
+        vector_db_init [label="{VectorDatabase | - add_speakers()\l}"];
+        chromadb_storage [label="{ChromaDB Storage | ./data/vector_store/chroma_db}"];
+        
+        speakers_csv -> data_processor;
+        topics_csv -> data_processor;
+        data_processor -> vector_db_init [label="1. Create profiles & generate embeddings via NVIDIA service"];
+        vector_db_init -> chromadb_storage [label="2. Store embeddings & metadata"];
+    }
+
+    subgraph cluster_runtime {
+        label="Runtime Search Flow (Per User Query)";
+        style="filled,rounded";
+        fillcolor="#f6ffed";
+        
+        user [label="User", shape=oval, style="filled", fillcolor="#ffccc7"];
+        
+        subgraph cluster_frontend {
+            label="Frontend";
+            style="filled,rounded";
+            fillcolor="#fffbe6";
+            streamlit_app [label="{Streamlit Web App | UI for query and results}"];
+        }
+
+        subgraph cluster_backend {
+            label="Backend (FastAPI)";
+            style="filled,rounded";
+            fillcolor="#fafafa";
+            
+            api_endpoint [label="{/api/v1/search (POST)}"];
+            query_processor [label="{QueryProcessor | - process_query()\l}"];
+            vector_db_search [label="{VectorDatabase | - hybrid_search()\l}"];
+        }
+
+        subgraph cluster_nvidia_services {
+            label="NVIDIA AI Services (NIM)";
+            style="filled,rounded";
+            fillcolor="#f9f0ff";
+            
+            nvidia_llm [label="{LLM Service | (Llama-3.1-Nemotron-Nano-4B)\l}"];
+            nvidia_embedding [label="{Embedding Service | (snowflake/arctic-embed-l)\l}"];
+            nvidia_reranker [label="{Reranker Service | (llama-3.2-nemoretriever)\l}"];
+        }
+
+        // Define Runtime Flow
+        user -> streamlit_app [label="3. Enters search query"];
+        streamlit_app -> api_endpoint [label="4. HTTP POST request"];
+        api_endpoint -> query_processor [label="5. Process query"];
+        
+        query_processor -> nvidia_llm [label="6. Analyze query intent", ltail=cluster_backend, lhead=cluster_nvidia_services];
+        nvidia_llm -> query_processor [label="7. Return structured analysis"];
+        
+        query_processor -> nvidia_embedding [label="8. Generate query embedding"];
+        nvidia_embedding -> query_processor [label="9. Return query vector"];
+        
+        query_processor -> vector_db_search [label="10. Pass query vector & text"];
+        vector_db_search -> chromadb_storage [label="11. Similarity search"];
+        chromadb_storage -> vector_db_search [label="12. Return initial candidates"];
+        
+        vector_db_search -> nvidia_reranker [label="13. Send candidates for reranking", ltail=cluster_backend, lhead=cluster_nvidia_services];
+        nvidia_reranker -> vector_db_search [label="14. Return reranked candidates"];
+        
+        vector_db_search -> api_endpoint [label="15. Return final speaker list"];
+        
+        api_endpoint -> nvidia_llm [label="16. Generate explanation & recommendation", ltail=cluster_backend, lhead=cluster_nvidia_services];
+        nvidia_llm -> api_endpoint [label="17. Return generated text"];
+        
+        api_endpoint -> streamlit_app [label="18. HTTP Response (JSON)", ltail=cluster_backend, lhead=cluster_frontend];
+        streamlit_app -> user [label="19. Display results"];
+    }
+}
