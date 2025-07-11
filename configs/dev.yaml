@@ -1,0 +1,30 @@
+nvidia:
+  base_url: "http://localhost:8000"
+  embedding_model: "snowflake/arctic-embed-l"
+  llm_model: "nvidia/llama3.1-nemotron-nano-4b-v1.1"
+  reranker_model: "nvidia/nv-rerank-v1"
+  timeout: 30
+  max_retries: 3
+
+vectordb:
+  persist_directory: "./data/vector_store/chroma_db"
+  collection_name: "speakers"
+  distance_metric: "cosine"
+
+data:
+  speakers_file: "./data/raw/speakersdata.csv"
+  topics_file: "./data/raw/speakertopics.csv"
+  processed_data_dir: "./data/processed"
+  batch_size: 50
+
+api:
+  host: "0.0.0.0"
+  port: 8002
+  reload: true
+  log_level: "DEBUG"
+  cors_origins: ["*"]
+
+app:
+  max_results: 10
+  similarity_threshold: 0.3
+  debug: true
