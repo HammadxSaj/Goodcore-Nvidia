@@ -76,51 +76,51 @@ class RateLimiter:
 
 class NVIDIAServicesClient:
     """Client for NVIDIA AI services with rate limiting and service-specific ports"""
-    
+
     def __init__(self):
         # Service-specific URLs
         self.base_host = config.nvidia.base_url.replace('http://', '').replace('https://', '').split(':')[0]
         self.protocol = 'http://' if 'http://' in config.nvidia.base_url else 'https://'
-        
+
         # Service-specific ports
         self.embedding_url = f"{self.protocol}{self.base_host}:8090"  # Embedding service
         self.llm_url = f"{self.protocol}{self.base_host}:8070"        # LLM service  
         self.reranker_url = f"{self.protocol}{self.base_host}:8060"   # Reranker service
-        
+
         self.embedding_model = config.nvidia.embedding_model
         self.llm_model = config.nvidia.llm_model
         self.reranker_model = config.nvidia.reranker_model
         self.timeout = config.nvidia.timeout
         self.max_retries = config.nvidia.max_retries
-        
+
         # Rate limiter for developer account (40 requests/minute)
         self.rate_limiter = RateLimiter(requests_per_minute=35)  # Conservative limit
-        
+
         self.headers = {
             'Content-Type': 'application/json',
             'Accept': 'application/json'
         }
-        
+
         # Add API key if provided
         if config.nvidia.api_key:
             self.headers['Authorization'] = f'Bearer {config.nvidia.api_key}'
-        
+
         logger.info(f"Initialized NVIDIA client with service-specific ports:")
         logger.info(f"  Embedding: {self.embedding_url}")
         logger.info(f"  LLM: {self.llm_url}")  
         logger.info(f"  Reranker: {self.reranker_url}")
-    
+
     async def health_check(self) -> Dict[str, Any]:
         """Check if NVIDIA services are available"""
         services_status = {}
-        
+
         # Check each service individually
         services = {
             'embedding': self.embedding_url,
             'llm': self.llm_url,
             'reranker': self.reranker_url
         }
-        
+
         for service_name, service_url in services.items():
             try:
                 async with aiohttp.ClientSession() as session:
@@ -139,15 +139,15 @@ class NVIDIAServicesClient:
                     'status': 'unhealthy',
                     'error': str(e)
                 }
-        
+
         # Overall status
         all_healthy = all(service['status'] == 'healthy' for service in services_status.values())
-        
+
         return {
             'status': 'healthy' if all_healthy else 'partial',
             'services': services_status
         }
-    
+
     async def generate_embeddings(
         self, 
         texts: List[str],
@@ -155,7 +155,7 @@ class NVIDIAServicesClient:
         batch_size: int = 5  # Smaller batches for rate limiting
     ) -> EmbeddingResponse:
         """Generate embeddings for texts using NVIDIA embedding model"""
-        
+
         if not texts:
             return EmbeddingResponse(
                 embeddings=[],
@@ -164,42 +164,42 @@ class NVIDIAServicesClient:
                 success=False,
                 error="No texts provided"
             )
-        
+
         logger.info(f"Generating embeddings for {len(texts)} texts with input_type: {input_type}")
-        
+
         try:
             # Process in smaller batches with rate limiting
             all_embeddings = []
             total_usage = {"prompt_tokens": 0, "total_tokens": 0}
-            
+
             for i in range(0, len(texts), batch_size):
                 batch = texts[i:i + batch_size]
                 logger.debug(f"Processing embedding batch {i//batch_size + 1}/{(len(texts)-1)//batch_size + 1}")
-                
+
                 # Wait for rate limit
                 await self.rate_limiter.wait_if_needed()
-                
+
                 batch_response = await self._generate_embeddings_batch(batch, input_type)
-                
+
                 if not batch_response.success:
                     return batch_response
-                
+
                 all_embeddings.extend(batch_response.embeddings)
-                
+
                 # Accumulate usage stats
                 for key in total_usage:
                     total_usage[key] += batch_response.usage.get(key, 0)
-                
+
                 # Small delay between batches
                 await asyncio.sleep(0.5)
-            
+
             return EmbeddingResponse(
                 embeddings=all_embeddings,
                 usage=total_usage,
                 model=self.embedding_model,
                 success=True
             )
-            
+
         except Exception as e:
             logger.error(f"Error generating embeddings: {e}")
             return EmbeddingResponse(
@@ -209,17 +209,17 @@ class NVIDIAServicesClient:
                 success=False,
                 error=str(e)
             )
-    
+
     async def _generate_embeddings_batch(self, texts: List[str], input_type: str) -> EmbeddingResponse:
         """Generate embeddings for a batch of texts"""
-        
+
         payload = {
             "model": self.embedding_model,
             "input": texts,
             "encoding_format": "float",
             "input_type": input_type  # Added input_type parameter
         }
-        
+
         for attempt in range(self.max_retries):
             try:
                 async with aiohttp.ClientSession() as session:
@@ -229,13 +229,13 @@ class NVIDIAServicesClient:
                         headers=self.headers,
                         timeout=aiohttp.ClientTimeout(total=self.timeout)
                     ) as response:
-                        
+
                         if response.status == 200:
                             result = await response.json()
-                            
+
                             # Extract embeddings from response
                             embeddings = [item['embedding'] for item in result['data']]
-                            
+
                             return EmbeddingResponse(
                                 embeddings=embeddings,
                                 usage=result.get('usage', {}),
@@ -245,7 +245,7 @@ class NVIDIAServicesClient:
                         else:
                             error_text = await response.text()
                             logger.warning(f"Embedding request failed (attempt {attempt + 1}): {response.status} - {error_text}")
-                            
+
                             if attempt == self.max_retries - 1:
                                 return EmbeddingResponse(
                                     embeddings=[],
@@ -254,10 +254,10 @@ class NVIDIAServicesClient:
                                     success=False,
                                     error=f"HTTP {response.status}: {error_text}"
                                 )
-                            
+
                             # Exponential backoff
                             await asyncio.sleep(2 ** attempt)
-                            
+
             except Exception as e:
                 logger.warning(f"Embedding request exception (attempt {attempt + 1}): {e}")
                 if attempt == self.max_retries - 1:
@@ -269,7 +269,7 @@ class NVIDIAServicesClient:
                         error=str(e)
                     )
                 await asyncio.sleep(2 ** attempt)
-        
+
         return EmbeddingResponse(
             embeddings=[],
             usage={},
@@ -277,18 +277,18 @@ class NVIDIAServicesClient:
             success=False,
             error="Max retries exceeded"
         )
-    
+
     async def generate_llm_response(
-        self, 
+        self,
         messages: List[Dict[str, str]],
-        max_tokens: int = 1000,
-        temperature: float = 0.3
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
     ) -> LLMResponse:
         """Generate LLM response using NVIDIA LLM model"""
-        
+
         # Wait for rate limit
         await self.rate_limiter.wait_if_needed()
-        
+
         payload = {
             "model": self.llm_model,
             "messages": messages,
@@ -296,9 +296,9 @@ class NVIDIAServicesClient:
             "temperature": temperature,
             "stream": False
         }
-        
+
         logger.info(f"Generating LLM response with {len(messages)} messages")
-        
+
         for attempt in range(self.max_retries):
             try:
                 async with aiohttp.ClientSession() as session:
@@ -308,12 +308,12 @@ class NVIDIAServicesClient:
                         headers=self.headers,
                         timeout=aiohttp.ClientTimeout(total=self.timeout)
                     ) as response:
-                        
+
                         if response.status == 200:
                             result = await response.json()
-                            
+
                             content = result['choices'][0]['message']['content']
-                            
+
                             return LLMResponse(
                                 content=content,
                                 usage=result.get('usage', {}),
@@ -323,7 +323,7 @@ class NVIDIAServicesClient:
                         else:
                             error_text = await response.text()
                             logger.warning(f"LLM request failed (attempt {attempt + 1}): {response.status} - {error_text}")
-                            
+
                             if attempt == self.max_retries - 1:
                                 return LLMResponse(
                                     content="",
@@ -332,9 +332,9 @@ class NVIDIAServicesClient:
                                     success=False,
                                     error=f"HTTP {response.status}: {error_text}"
                                 )
-                            
+
                             await asyncio.sleep(2 ** attempt)
-                            
+
             except Exception as e:
                 logger.warning(f"LLM request exception (attempt {attempt + 1}): {e}")
                 if attempt == self.max_retries - 1:
@@ -346,7 +346,7 @@ class NVIDIAServicesClient:
                         error=str(e)
                     )
                 await asyncio.sleep(2 ** attempt)
-        
+
         return LLMResponse(
             content="",
             usage={},
@@ -354,7 +354,7 @@ class NVIDIAServicesClient:
             success=False,
             error="Max retries exceeded"
         )
-    
+
     async def rerank_results(
         self,
         query: str,
@@ -362,7 +362,7 @@ class NVIDIAServicesClient:
         top_k: int = 10
     ) -> RerankResponse:
         """Rerank search results using NVIDIA reranking model"""
-        
+
         if not candidates:
             return RerankResponse(
                 rankings=[],
@@ -371,10 +371,10 @@ class NVIDIAServicesClient:
                 success=False,
                 error="No candidates provided"
             )
-        
+
         # Wait for rate limit
         await self.rate_limiter.wait_if_needed()
-        
+
         # Prepare candidates for reranking - using passages format as per NVIDIA docs
         passages = []
         for candidate in candidates:
@@ -383,7 +383,7 @@ class NVIDIAServicesClient:
             if not doc_text:
                 doc_text = f"{candidate.get('name', '')} {candidate.get('job_title', '')} {candidate.get('bio', '')}"
             passages.append({"text": doc_text})
-        
+
         # Format payload according to NVIDIA NIM documentation
         payload = {
             "model": self.reranker_model,
@@ -392,10 +392,10 @@ class NVIDIAServicesClient:
             "top_k": min(top_k, len(passages)),
             "truncate": "END"  # Add truncate parameter as shown in docs
         }
-        
+
         logger.info(f"Reranking {len(candidates)} candidates")
         logger.debug(f"Rerank payload: {json.dumps(payload, indent=2)}")
-        
+
         for attempt in range(self.max_retries):
             try:
                 async with aiohttp.ClientSession() as session:
@@ -405,7 +405,7 @@ class NVIDIAServicesClient:
                         headers=self.headers,
                         timeout=aiohttp.ClientTimeout(total=self.timeout)
                     ) as response:
-                        
+
                         if response.status == 200:
                             result = await response.json()
                             # DEBUG: Print detailed reranking response
@@ -415,23 +415,23 @@ class NVIDIAServicesClient:
                             print(f"Full response: {json.dumps(result, indent=2)}")
 
                             logger.debug(f"Rerank response: {json.dumps(result, indent=2)}")
-                            
+
                             # Check response structure and handle different formats
                             rankings = []
-                            
+
                             # Try different possible response structures
                             if 'rankings' in result:
                                 # Handle NVIDIA NIM reranker response format with logits
                                 for i, item in enumerate(result['rankings']):
                                     original_idx = item['index']
                                     candidate = candidates[original_idx].copy()
-                                    
+
                                     # Convert logit to normalized score (0-1 range)
                                     logit = item.get('logit', 0.0)
                                     # Use sigmoid function to convert logit to probability
                                     import math
                                     rerank_score = 1.0 / (1.0 + math.exp(-logit))
-                                    
+
                                     candidate['rerank_score'] = rerank_score
                                     candidate['rerank_position'] = i + 1
                                     rankings.append(candidate)
@@ -452,7 +452,7 @@ class NVIDIAServicesClient:
                                     candidate_copy['rerank_score'] = 1.0 - (i * 0.1)  # Dummy decreasing scores
                                     candidate_copy['rerank_position'] = i + 1
                                     rankings.append(candidate_copy)
-                            
+
                             return RerankResponse(
                                 rankings=rankings,
                                 usage=result.get('usage', {}),
@@ -462,7 +462,7 @@ class NVIDIAServicesClient:
                         else:
                             error_text = await response.text()
                             logger.warning(f"Rerank request failed (attempt {attempt + 1}): {response.status} - {error_text}")
-                            
+
                             if attempt == self.max_retries - 1:
                                 # Return original candidates without reranking
                                 return RerankResponse(
@@ -472,13 +472,13 @@ class NVIDIAServicesClient:
                                     success=False,
                                     error=f"HTTP {response.status}: {error_text}"
                                 )
-                            
+
                             await asyncio.sleep(2 ** attempt)
-                            
+
             except Exception as e:
                 logger.warning(f"Rerank request exception (attempt {attempt + 1}): {e}")
                 logger.debug(f"Exception details: {type(e).__name__}: {str(e)}")
-                
+
                 if attempt == self.max_retries - 1:
                     return RerankResponse(
                         rankings=candidates[:top_k],
@@ -488,7 +488,7 @@ class NVIDIAServicesClient:
                         error=str(e)
                     )
                 await asyncio.sleep(2 ** attempt)
-        
+
         return RerankResponse(
             rankings=candidates[:top_k],
             usage={},
@@ -496,46 +496,46 @@ class NVIDIAServicesClient:
             success=False,
             error="Max retries exceeded"
         )
-    
+
     def calculate_similarity(
         self,
         embedding1: List[float],
         embedding2: List[float]
     ) -> float:
         """Calculate cosine similarity between two embeddings"""
-        
+
         try:
             # Convert to numpy arrays
             vec1 = np.array(embedding1)
             vec2 = np.array(embedding2)
-            
+
             # Calculate cosine similarity
             dot_product = np.dot(vec1, vec2)
             norm1 = np.linalg.norm(vec1)
             norm2 = np.linalg.norm(vec2)
-            
+
             if norm1 == 0 or norm2 == 0:
                 return 0.0
-            
+
             similarity = dot_product / (norm1 * norm2)
             return float(similarity)
-            
+
         except Exception as e:
             logger.error(f"Error calculating similarity: {e}")
             return 0.0
-    
+
     async def test_all_services(self) -> Dict[str, Any]:
         """Test all NVIDIA services"""
-        
+
         logger.info("Testing NVIDIA services...")
-        
+
         results = {
             'health_check': await self.health_check(),
             'embedding_test': None,
             'llm_test': None,
             'rerank_test': None
         }
-        
+
         # Test embedding service
         try:
             embedding_response = await self.generate_embeddings(
@@ -553,7 +553,7 @@ class NVIDIAServicesClient:
                 'success': False,
                 'error': str(e)
             }
-        
+
         # Test LLM service
         try:
             llm_response = await self.generate_llm_response([
@@ -570,14 +570,14 @@ class NVIDIAServicesClient:
                 'success': False,
                 'error': str(e)
             }
-        
+
         # Test reranking service
         try:
             test_candidates = [
                 {'name': 'John Doe', 'job_title': 'Engineer', 'searchable_text': 'John is a software engineer'},
                 {'name': 'Jane Smith', 'job_title': 'Manager', 'searchable_text': 'Jane is a project manager'}
             ]
-            
+
             rerank_response = await self.rerank_results(
                 "software engineer",
                 test_candidates,
@@ -594,7 +594,7 @@ class NVIDIAServicesClient:
                 'success': False,
                 'error': str(e)
             }
-        
+
         return results
 
 # Global client instance
@@ -605,9 +605,15 @@ async def generate_embeddings(texts: List[str], input_type: str = "passage") -> 
     """Utility function to generate embeddings"""
     return await nvidia_client.generate_embeddings(texts, input_type)
 
-async def generate_llm_response(messages: List[Dict[str, str]]) -> LLMResponse:
+
+async def generate_llm_response(
+    messages: List[Dict[str, str]],
+    max_tokens: Optional[int] = None,
+    temperature: Optional[float] = None,
+) -> LLMResponse:
     """Utility function to generate LLM response"""
-    return await nvidia_client.generate_llm_response(messages)
+    return await nvidia_client.generate_llm_response(messages, max_tokens, temperature)
+
 
 async def rerank_results(query: str, candidates: List[Dict[str, Any]]) -> RerankResponse:
     """Utility function to rerank results"""

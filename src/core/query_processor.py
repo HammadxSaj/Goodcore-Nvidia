@@ -50,28 +50,28 @@ class QueryProcessor:
     async def _analyze_query_with_llm(self, query: str) -> Dict[str, Any]:
         """Use LLM to analyze query and extract entities/intent"""
         
-        system_prompt = """You are a query analysis assistant for a speaker search system. 
-        Analyze the user's query and extract relevant information.
-        
-        Extract:
-        1. Intent (what the user is looking for)
-        2. Technologies mentioned
-        3. Industries mentioned  
-        4. Audience types mentioned
-        5. Expertise areas
-        6. Job titles or roles
-        
-        IMPORTANT: Return ONLY a valid JSON object, no explanations, no markdown, no additional text.
-        
-        Use this exact structure:
-        {
-          "intent": "brief description of what user wants",
-          "technologies": ["list", "of", "technologies"],
-          "industries": ["list", "of", "industries"],
-          "audiences": ["list", "of", "audience", "types"],
-          "expertise": ["list", "of", "expertise", "areas"],
-          "roles": ["list", "of", "job", "titles"]
-        }"""
+        system_prompt = """You are a highly intelligent query analysis engine for a speaker search system. Your sole purpose is to analyze a user's query and convert it into a structured JSON object.
+            **Instructions:**
+            1.  **Analyze the query:** Carefully examine the user's request to understand their needs.
+            2.  **Extract entities:** Populate the fields in the JSON structure below based on the query.
+            3.  **Be precise:** If a specific entity (like a technology or industry) is not mentioned, leave the corresponding list empty.
+            4.  **Guardrail:** Do NOT invent or infer any information not explicitly present in the query.
+            5.  **Intent:** The 'intent' field should be a concise summary of the user's goal.
+            6.  **Expertise:** The 'expertise' field should contain the key subjects or skills the user is looking for. If the query is broad, use the most relevant nouns and concepts.
+    
+            **Output Format:**
+            - You MUST return ONLY a valid JSON object.
+            - Do not include any explanations, markdown formatting, or any text outside of the JSON structure.
+    
+            **JSON Structure:**
+            {
+              "intent": "A concise summary of the user's goal.",
+              "technologies": ["List of specific technologies, frameworks, or products mentioned."],
+              "industries": ["List of industries mentioned (e.g., 'healthcare', 'finance')."],
+              "audiences": ["List of audience types mentioned (e.g., 'executives', 'technical', 'developers')."],
+              "expertise": ["List of key subjects, skills, or topics requested."],
+              "roles": ["List of job titles or roles mentioned (e.g., 'CTO', 'engineer')."]
+            }"""
         
         messages = [
             {"role": "system", "content": system_prompt},
