@@ -45,7 +45,7 @@ def get_system_stats() -> Dict[str, Any]:
         return {}
 
 
-def search_speakers(query: str, max_results: int = 5) -> Dict[str, Any]:
+def search_speakers(query: str, max_results: int = 10) -> Dict[str, Any]:
     """Search for speakers using the API"""
     try:
         payload = {"query": query, "max_results": max_results}
