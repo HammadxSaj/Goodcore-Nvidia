@@ -171,7 +171,7 @@ class QueryProcessor:
     async def enhance_query_with_llm(self, query: str) -> str:
         """Use LLM to enhance and expand the query for better speaker search results"""
         
-        system_prompt = """<no_think> You are a query enhancement specialist for a professional speaker search system. Your task is to expand and enrich user queries to maximize search effectiveness while maintaining the original intent.
+        system_prompt = """<no_think>. Detailed thinking off. You are a query enhancement specialist for a professional speaker search system. Your task is to expand and enrich user queries to maximize search effectiveness while maintaining the original intent.
 
     **Enhancement Strategy:**
     1. **Preserve Original Intent**: Keep the core meaning and requirements intact
@@ -199,7 +199,7 @@ class QueryProcessor:
         
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Enhance this speaker search query: {query}"}
+            {"role": "user", "content": f"Enhance this speaker search query: <no_think> {query}"}
         ]
         
         try:
