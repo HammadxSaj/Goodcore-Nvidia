@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # Pydantic models for API
 class SearchQuery(BaseModel):
     query: str
-    max_results: int = 5
+    max_results: int = 10
 
 
 class SpeakerResult(BaseModel):
@@ -344,47 +344,128 @@ async def search_speakers(search_query: SearchQuery):
             )
             speaker_results.append(speaker_result)
 
-        # Phase 4: Generate explanation and recommendation using LLM (like in test)
-        system_prompt = """You are an AI Assistant for Speaker Selection. Your goal is to provide a concise, professional, and helpful summary for event organizers.
-    
-            **Instructions:**
-            1.  **Analyze the Results:** Review the user's query and the list of speakers found.
-            2.  **Provide a High-Level Analysis:** In the "Analysis" section, your goal is to provide a strategic overview of the search results *as a group*.
-                -   Synthesize information from all returned profiles to identify common themes, shared expertise, or different categories of speakers found (e.g., "The results include both deep technical
-    experts and high-level strategic thinkers...").
-                -   Explain why this *group* of candidates is a strong starting point for the user's search.
-                -   Keep this section to 2-3 sentences. **Do not discuss individual speakers here.**
-            3.  **Make a Top Recommendation:** In the "Top Recommendation" section, now focus on a single individual.
-                -   Identify the single best speaker from the list who most closely matches the user's query.
-                -   Justify your choice in 1-2 sentences, explaining what makes them stand out from the rest of the group.
-            4.  **Guardrail:** Base your analysis STRICTLY on the provided speaker information. Do not invent or infer details not present in the context.
-            5.  **Tone:** Be concise, professional, and direct.
-   
-            **Output Format:**
-            - You MUST use the following Markdown structure. Do not add any other text.
-            ### Analysis
-            (Your 2-3 sentence high-level analysis of the group here)
-   
-            ### Top Recommendation
-            (Your 1-2 sentence specific recommendation here)
-        """
+        # NEW PHASE: LLM Shortlisting
+        final_speaker_results = []
+        if speaker_results:
+            # Create a concise context of the candidates for the LLM
+            shortlist_context = "\n".join(
+                [
+                    f"ID: {s.speaker_id}, Name: {s.name}, Title: {s.job_title}, Company: {s.company or 'N/A'}, Bio: {(s.bio + '...') if s.bio else s.bio or 'N/A'}, Topics: {', '.join(s.speaking_topics) if s.speaking_topics else 'N/A'}, Specializations: {s.specializations or 'N/A'}"
+                    for s in speaker_results
+                ]
+            )
 
-        # Create a concise context string for the LLM
+            shortlisting_system_prompt = """Detailed thinking off. You are an expert talent scout and event organizer's assistant. Your task is to review a list of potential speakers and shortlist the absolute best candidates based on the user's original query.
+
+**Instructions:**
+1. **Review the Query:** Carefully consider the user's original request.
+2. **Analyze the Candidates:** Examine the provided list of up to 10 speaker profiles.
+3. **Select the Best:** Choose a variable number of speakers who are the strongest match. Do not feel obligated to select all of them. Quality is more important than quantity. If only 3 are a great fit, select only 3.
+4. **Provide Justification:** For each speaker you select, provide a brief, one-sentence justification for why they are a good fit.
+5. **Return JSON:** Your output MUST be a single, valid JSON object containing a list named "shortlist". Each item in the list should be an object with "speaker_id" and "justification".
+
+YOU MUST ABIDE BY THE FOLLOWING FORMAT:
+
+**Example Output Format:**
+{
+  "shortlist": [
+    {
+      "speaker_id": "12345",
+      "justification": "This speaker's deep experience in cloud security directly matches the core of the user's request."
+    },
+    {
+      "speaker_id": "67890",
+      "justification": "Offers a high-level, strategic perspective on the topic, which is perfect for a business audience."
+    }
+  ]
+}"""
+
+            user_prompt_for_shortlisting = f"""
+**User Query:** "{query_params.get('enhanced_query', search_query.query)}"
+
+**Candidate Speakers:**
+{shortlist_context}
+
+Please analyze these candidates and return the JSON shortlist of the best fits."""
+
+            shortlisting_response = await generate_llm_response(
+                [
+                    {"role": "system", "content": shortlisting_system_prompt},
+                    {"role": "user", "content": user_prompt_for_shortlisting},
+                ]
+            )
+
+            if shortlisting_response.success:
+                try:
+                    shortlist_data = json.loads(shortlisting_response.content)
+                    selected_ids = {
+                        item["speaker_id"]
+                        for item in shortlist_data.get("shortlist", [])
+                    }
+
+                    # Filter the original list to keep only the selected speakers
+                    final_speaker_results = [
+                        s for s in speaker_results if s.speaker_id in selected_ids
+                    ]
+
+                    logger.info(
+                        f"LLM shortlisted {len(final_speaker_results)} speakers from the initial {len(speaker_results)}."
+                    )
+
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "Failed to parse LLM shortlist response. Falling back to original list."
+                    )
+                    final_speaker_results = speaker_results[:5]  # Fallback to top 5
+            else:
+                logger.warning(
+                    "LLM shortlisting call failed. Falling back to original list."
+                )
+                final_speaker_results = speaker_results[:5]  # Fallback to top 5
+        else:
+            final_speaker_results = []
+
+        # Phase 4: Generate explanation and recommendation using LLM (like in test)
+        # Use final_speaker_results instead of speaker_results from this point forward
+        system_prompt = """Detailed thinking off. You are an AI Assistant for Speaker Selection. Your goal is to provide a concise, professional, and helpful summary for event organizers.
+
+**Instructions:**
+1.  **Analyze the Results:** Review the user's query and the list of speakers found.
+2.  **Provide a High-Level Analysis:** In the "Analysis" section, your goal is to provide a strategic overview of the search results *as a group*.
+    -   Synthesize information from all returned profiles to identify common themes, shared expertise, or different categories of speakers found (e.g., "The results include both deep technical experts and high-level strategic thinkers...").
+    -   Explain why this *group* of candidates is a strong starting point for the user's search.
+    -   Keep this section to 2-3 sentences. **Do not discuss individual speakers here.**
+3.  **Make a Top Recommendation:** In the "Top Recommendation" section, now focus on a single individual.
+    -   Identify the single best speaker from the list who most closely matches the user's query.
+    -   Justify your choice in 1-2 sentences, explaining what makes them stand out from the rest of the group.
+4.  **Guardrail:** Base your analysis STRICTLY on the provided speaker information. Do not invent or infer details not present in the context.
+5.  **Tone:** Be concise, professional, and direct.
+
+**Output Format:**
+- You MUST use the following Markdown structure. Do not add any other text OR FOLLOW UP OR ANY EXPLANATION.
+### Analysis
+(Your 2-3 sentence high-level analysis of the group here)
+
+### Top Recommendation
+(Your 1-2 sentence specific recommendation here)
+"""
+
+        # Create a concise context string for the LLM using final_speaker_results
         speaker_context = "\n".join(
             [
-                f"- **{s.name}** ({s.job_title}): Specializes in {s.specializations or 'N/A'}. Key topics: {', '.join(s.speaking_topics[:3]) if s.speaking_topics else 'Not specified'}."
-                for s in speaker_results
+                f"- **{s.name}** ({s.job_title}): Specializes in {s.specializations or 'N/A'}. Key topics: {', '.join(s.speaking_topics) if s.speaking_topics else 'Not specified'}."
+                for s in final_speaker_results
             ]
         )
 
         user_prompt = f"""
-        **User Query:** "{search_query.query}"
+**User Query:** "{query_params.get('enhanced_query', search_query.query)}"
 
-        **Search Results:**
-        {speaker_context}
+**Search Results:**
+{speaker_context}
 
-        Please generate the analysis and recommendation based on these results.
-        """
+Please generate the analysis and recommendation based on these results.
+"""
 
         llm_response = await generate_llm_response(
             [
@@ -393,10 +474,10 @@ async def search_speakers(search_query: SearchQuery):
             ]
         )
 
-        explanation = f"Found {len(speaker_results)} speakers matching your criteria for '{search_query.query}'."
+        explanation = f"Found {len(final_speaker_results)} speakers matching your criteria for '{query_params.get('enhanced_query', search_query.query)}'."
         recommendation = (
-            f"Top recommendation: {speaker_results[0].name}"
-            if speaker_results
+            f"Top recommendation: {final_speaker_results[0].name}"
+            if final_speaker_results
             else "No recommendations available."
         )
 
@@ -420,11 +501,11 @@ async def search_speakers(search_query: SearchQuery):
         search_time = int((datetime.now() - start_time).total_seconds() * 1000)
 
         return SearchResponse(
-            speakers=speaker_results,
+            speakers=final_speaker_results,  # Use the shortlisted results
             explanation=explanation,
             recommendation=recommendation,
             query_analysis=query_analysis,
-            total_results=len(speaker_results),
+            total_results=len(final_speaker_results),  # Use the final count
             search_time_ms=search_time,
         )
 

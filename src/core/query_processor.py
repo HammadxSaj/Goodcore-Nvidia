@@ -55,7 +55,7 @@ class QueryProcessor:
     async def _analyze_query_with_llm(self, query: str) -> Dict[str, Any]:
         """Use LLM to analyze query and extract entities/intent"""
         
-        system_prompt = """You are a highly intelligent query analysis engine for a speaker search system. Your sole purpose is to analyze a user's query and convert it into a structured JSON object.
+        system_prompt = """Detailed thinking off. You are a highly intelligent query analysis engine for a speaker search system. Your sole purpose is to analyze a user's query and convert it into a structured JSON object.
             **Instructions:**
             1.  **Analyze the query:** Carefully examine the user's request to understand their needs.
             2.  **Extract entities:** Populate the fields in the JSON structure below based on the query.
@@ -190,6 +190,7 @@ class QueryProcessor:
 
     Keep in mind that the purpose of the entire system is to find the best speakers based on user queries. 
     The enhanced query should be comprehensive yet concise, ensuring it captures all relevant aspects of the user's request.
+    Keep in mind that if there is a mention of a specific topic or speaking topic, do not modify or paraphrase it.
 
     **Example:**
     Input: "GPU experts with experience delivering briefings on AI topics"
