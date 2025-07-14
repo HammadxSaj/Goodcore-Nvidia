@@ -148,14 +148,14 @@ python src/api/main.py
             )
 
             # Search metadata
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Speakers Found", results.get("total_results", 0))
-            with col2:
-                st.metric("Search Time", f"{results.get('search_time_ms', 0)}ms")
-            with col3:
-                intent = results.get("query_analysis", {}).get("intent", "Unknown")
-                st.write(f"**Query Intent:** {intent}")
+            # col1, col2, col3 = st.columns(3)
+            # with col1:
+            #     st.metric("Speakers Found", results.get("total_results", 0))
+            # with col2:
+            #     st.metric("Search Time", f"{results.get('search_time_ms', 0)}ms")
+            # with col3:
+            #     intent = results.get("query_analysis", {}).get("intent", "Unknown")
+            #     st.write(f"**Query Intent:** {intent}")
 
             # AI Explanation
             st.subheader("🧠 AI Analysis & Explanation")

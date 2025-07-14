@@ -346,21 +346,27 @@ async def search_speakers(search_query: SearchQuery):
 
         # Phase 4: Generate explanation and recommendation using LLM (like in test)
         system_prompt = """You are an AI Assistant for Speaker Selection. Your goal is to provide a concise, professional, and helpful summary for event organizers.
-
-        **Instructions:**
-        1.  **Analyze the Results:** Review the user's query and the list of speakers found.
-        2.  **Provide a Brief Analysis:** In the "Analysis" section, write a 2-3 sentence summary explaining *why* these speakers are a good match for the query. Highlight the key matching themes (e.g., shared expertise, industry alignment).
-        3.  **Make a Top Recommendation:** In the "Top Recommendation" section, identify the single best speaker from the list. Justify your choice in 1-2 sentences, explaining what makes them stand out for this specific query.
-        4.  **Guardrail:** Base your analysis STRICTLY on the provided speaker information. Do not invent or infer details not present in the context.
-        5.  **Tone:** Be concise, professional, and direct.
-
-        **Output Format:**
-        - You MUST use the following Markdown structure. Do not add any other text.
-        ### Analysis
-        (Your 2-3 sentence analysis here)
-
-        ### Top Recommendation
-        (Your 1-2 sentence recommendation here)
+    
+            **Instructions:**
+            1.  **Analyze the Results:** Review the user's query and the list of speakers found.
+            2.  **Provide a High-Level Analysis:** In the "Analysis" section, your goal is to provide a strategic overview of the search results *as a group*.
+                -   Synthesize information from all returned profiles to identify common themes, shared expertise, or different categories of speakers found (e.g., "The results include both deep technical
+    experts and high-level strategic thinkers...").
+                -   Explain why this *group* of candidates is a strong starting point for the user's search.
+                -   Keep this section to 2-3 sentences. **Do not discuss individual speakers here.**
+            3.  **Make a Top Recommendation:** In the "Top Recommendation" section, now focus on a single individual.
+                -   Identify the single best speaker from the list who most closely matches the user's query.
+                -   Justify your choice in 1-2 sentences, explaining what makes them stand out from the rest of the group.
+            4.  **Guardrail:** Base your analysis STRICTLY on the provided speaker information. Do not invent or infer details not present in the context.
+            5.  **Tone:** Be concise, professional, and direct.
+   
+            **Output Format:**
+            - You MUST use the following Markdown structure. Do not add any other text.
+            ### Analysis
+            (Your 2-3 sentence high-level analysis of the group here)
+   
+            ### Top Recommendation
+            (Your 1-2 sentence specific recommendation here)
         """
 
         # Create a concise context string for the LLM
