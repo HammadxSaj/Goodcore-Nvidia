@@ -287,7 +287,7 @@ async def search_speakers(search_query: SearchQuery):
         # Phase 2: Perform hybrid search (like in test)
         search_results = await vector_db.hybrid_search(
             query_embedding=query_embedding,
-            query_text=search_query.query,
+            query_text=query_params.get("enhanced_query", search_query.query),
             filters=None,
             limit=search_query.max_results,
         )

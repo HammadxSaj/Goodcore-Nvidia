@@ -171,7 +171,7 @@ class QueryProcessor:
     async def enhance_query_with_llm(self, query: str) -> str:
         """Use LLM to enhance and expand the query for better speaker search results"""
         
-        system_prompt = """You are a query enhancement specialist for a professional speaker search system. Your task is to expand and enrich user queries to maximize search effectiveness while maintaining the original intent.
+        system_prompt = """<no_think> You are a query enhancement specialist for a professional speaker search system. Your task is to expand and enrich user queries to maximize search effectiveness while maintaining the original intent.
 
     **Enhancement Strategy:**
     1. **Preserve Original Intent**: Keep the core meaning and requirements intact
@@ -188,11 +188,14 @@ class QueryProcessor:
     - Keep the enhanced query under 80 words
     - Focus on terms likely to appear in speaker profiles and bios
 
+    Keep in mind that the purpose of the entire system is to find the best speakers based on user queries. 
+    The enhanced query should be comprehensive yet concise, ensuring it captures all relevant aspects of the user's request.
+
     **Example:**
     Input: "GPU experts with experience delivering briefings on AI topics"
     Output: "Technical speakers and experts in GPUs, CUDA, high-performance computing, and parallel processing with experience presenting on artificial intelligence, machine learning, deep learning, and neural networks to professional and technical audiences"
 
-    Return only the enhanced query text."""
+    Return only the enhanced query text and nothing else. There is no need to return any explanations or additional information or any follow-up."""
         
         messages = [
             {"role": "system", "content": system_prompt},
