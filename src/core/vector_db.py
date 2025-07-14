@@ -247,81 +247,232 @@ class VectorDatabase:
         vector_weight: float = 0.7,
         limit: int = 20
     ) -> Dict[str, Any]:
-        """Perform hybrid search combining vector similarity and text matching"""
+        """Perform hybrid vector + rerank search with post-filtering for mandatory criteria"""
+        
+        try:
+            # Separate mandatory criteria from basic filters
+            mandatory_criteria = {}
+            basic_filters = {}
+            
+            if filters:
+                mandatory_criteria = {
+                    "job_title_contains": filters.get("job_title_contains", []),
+                    "topics_must_include": filters.get("topics_must_include", []),
+                    "centers_must_include": filters.get("centers_must_include", [])
+                }
+                
+                # Keep only basic filters that ChromaDB supports
+                for key, value in filters.items():
+                    if key not in ["job_title_contains", "topics_must_include", "centers_must_include"]:
+                        basic_filters[key] = value
 
-        # Get vector search results
-        vector_results = await self.search_speakers(
-            query_embedding=query_embedding,
-            filters=filters,
-            limit=limit * 2  # Get more candidates for reranking
-        )
+            # Build ChromaDB-compatible where clause (only basic filters)
+            where_clause = self._build_basic_where_clause(basic_filters)
+            
+            logger.info(f"Vector search with basic filters: {where_clause}")
+            logger.info(f"Post-filtering with mandatory criteria: {mandatory_criteria}")
 
-        if not vector_results["success"]:
-            return vector_results
+            # Step 1: Vector search with basic filters only
+            collection = self.client.get_collection(name=self.collection_name)
+            
+            # Get more results to account for post-filtering
+            search_limit = limit * 3  # Get 3x more results for post-filtering
+            
+            results = collection.query(
+                query_embeddings=[query_embedding],
+                where=where_clause,
+                n_results=search_limit,
+                include=["documents", "metadatas", "distances"]
+            )
 
-        candidates = vector_results["candidates"]
+            if not results['documents'] or not results['documents'][0]:
+                logger.info("No documents found in vector search")
+                return {
+                    "success": True,
+                    "candidates": [],
+                    "total_found": 0,
+                    "search_type": "no_results"
+                }
 
-        # If we have candidates, use NVIDIA reranking
-        if candidates:
-            try:
-                rerank_response = await nvidia_client.rerank_results(
-                    query=query_text,
-                    candidates=candidates,
-                    top_k=limit
-                )
+            # Convert to candidates with similarity scores
+            documents = results['documents'][0]
+            metadatas = results['metadatas'][0] if results['metadatas'] else [{}] * len(documents)
+            distances = results['distances'][0] if results['distances'] else [0.0] * len(documents)
+            ids = results['ids'][0] if results['ids'] else [str(i) for i in range(len(documents))]
 
-                if rerank_response.success:
-                    # Combine vector similarity and rerank scores
-                    for candidate in rerank_response.rankings:
-                        vector_score = candidate.get('similarity_score', 0.0)
-                        rerank_score = candidate.get('rerank_score', 0.0)
+            candidates = []
+            for i, doc in enumerate(documents):
+                metadata = metadatas[i] if i < len(metadatas) else {}
+                distance = distances[i] if i < len(distances) else 0.0
+                doc_id = ids[i] if i < len(ids) else str(i)
+                
+                # Convert distance to similarity (assuming cosine distance)
+                similarity = 1.0 - distance
+                
+                candidate = {
+                    'id': doc_id,
+                    'document': doc,
+                    'metadata': metadata,
+                    'similarity_score': similarity,
+                    **metadata  # Flatten metadata into candidate
+                }
+                candidates.append(candidate)
 
-                        # Weighted combination
-                        candidate['hybrid_score'] = (
-                            vector_weight * vector_score + 
-                            (1 - vector_weight) * rerank_score
+            logger.info(f"Vector search found {len(candidates)} candidates before post-filtering")
+
+            # Step 2: Apply mandatory criteria post-filtering
+            if any(mandatory_criteria.get(key) for key in mandatory_criteria.keys()):
+                candidates = self._apply_mandatory_filters(candidates, mandatory_criteria)
+                logger.info(f"After mandatory filtering: {len(candidates)} candidates remain")
+
+            # Step 3: Rerank the filtered candidates
+            if candidates:
+                try:
+                    rerank_response = await nvidia_client.rerank_results(
+                        query=query_text,
+                        candidates=candidates,
+                        top_k=limit
+                    )
+
+                    if rerank_response.success:
+                        # Combine vector similarity and rerank scores
+                        for candidate in rerank_response.rankings:
+                            vector_score = candidate.get('similarity_score', 0.0)
+                            rerank_score = candidate.get('rerank_score', 0.0)
+
+                            # Weighted combination
+                            candidate['hybrid_score'] = (
+                                vector_weight * vector_score + 
+                                (1 - vector_weight) * rerank_score
+                            )
+
+                        # Sort by hybrid score
+                        rerank_response.rankings.sort(
+                            key=lambda x: x.get('hybrid_score', 0.0), 
+                            reverse=True
                         )
 
-                    # Sort by hybrid score
-                    rerank_response.rankings.sort(
-                        key=lambda x: x.get('hybrid_score', 0.0), 
-                        reverse=True
-                    )
+                        return {
+                            "success": True,
+                            "candidates": rerank_response.rankings[:limit],
+                            "total_found": len(rerank_response.rankings),
+                            "search_type": "hybrid_with_mandatory_filtering"
+                        }
+                    else:
+                        logger.warning(f"Reranking failed, using filtered vector results: {rerank_response.error}")
+                        return {
+                            "success": True,
+                            "candidates": candidates[:limit],
+                            "total_found": len(candidates),
+                            "search_type": "vector_with_mandatory_filtering"
+                        }
 
-                    logger.info(
-                        f"Reranked candidates: {rerank_response.rankings[:limit]}"
-                    )
-
-                    return {
-                        "success": True,
-                        "candidates": rerank_response.rankings[:limit],
-                        "total_found": len(rerank_response.rankings),
-                        "search_type": "hybrid"
-                    }
-                else:
-                    logger.warning(f"Reranking failed, using vector results: {rerank_response.error}")
+                except Exception as e:
+                    logger.error(f"Error in reranking: {e}")
                     return {
                         "success": True,
                         "candidates": candidates[:limit],
                         "total_found": len(candidates),
-                        "search_type": "vector_only"
+                        "search_type": "vector_with_mandatory_filtering"
                     }
 
-            except Exception as e:
-                logger.error(f"Error in hybrid search reranking: {e}")
-                return {
-                    "success": True,
-                    "candidates": candidates[:limit],
-                    "total_found": len(candidates),
-                    "search_type": "vector_only"
-                }
+            return {
+                "success": True,
+                "candidates": [],
+                "total_found": 0,
+                "search_type": "no_results_after_filtering"
+            }
 
-        return {
-            "success": True,
-            "candidates": [],
-            "total_found": 0,
-            "search_type": "no_results"
-        }
+        except Exception as e:
+            logger.error(f"Error in hybrid search: {e}")
+            return {
+                "success": False,
+                "candidates": [],
+                "total_found": 0,
+                "search_type": "error",
+                "error": str(e)
+            }
+
+    def _build_basic_where_clause(self, filters: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Build ChromaDB where clause for basic filters only (no mandatory criteria)"""
+        if not filters:
+            return None
+
+        and_conditions = []
+
+        # Handle text filters (exact match only)
+        for field in ['location', 'company']:
+            if filters.get(field):
+                and_conditions.append({field: {"$eq": filters[field]}})
+
+        # Handle numeric filters
+        if filters.get('min_experience'):
+            and_conditions.append({'years_experience': {"$gte": float(filters['min_experience'])}})
+
+        if filters.get('max_experience'):
+            and_conditions.append({'years_experience': {"$lte": float(filters['max_experience'])}})
+
+        # Handle list filters (exact match only)
+        for field in ['speaking_topics', 'specializations', 'audiences']:
+            if filters.get(field):
+                and_conditions.append({field: {"$eq": filters[field]}})
+
+        if not and_conditions:
+            return None
+
+        if len(and_conditions) == 1:
+            return and_conditions[0]
+
+        return {"$and": and_conditions}
+
+    def _apply_mandatory_filters(self, candidates: List[Dict], mandatory_criteria: Dict[str, Any]) -> List[Dict]:
+        """Apply mandatory criteria filtering in Python"""
+        filtered_candidates = []
+        
+        for candidate in candidates:
+            # Check job title requirements
+            if mandatory_criteria.get("job_title_contains"):
+                job_title = candidate.get("job_title", "").lower()
+                job_title_match = any(
+                    keyword.lower() in job_title 
+                    for keyword in mandatory_criteria["job_title_contains"]
+                )
+                if not job_title_match:
+                    continue
+            
+            # Check topic requirements
+            if mandatory_criteria.get("topics_must_include"):
+                # Collect all topic-related fields
+                speaking_topics = candidate.get("speaking_topics", "").lower()
+                specializations = candidate.get("specializations", "").lower()
+                topics_general = candidate.get("topics_general", "").lower()
+                all_topics = f"{speaking_topics} {specializations} {topics_general}"
+                
+                # Check if ANY of the required topics are present
+                topic_match = any(
+                    topic.lower() in all_topics 
+                    for topic in mandatory_criteria["topics_must_include"]
+                )
+                if not topic_match:
+                    continue
+            
+            # Check center/location requirements
+            if mandatory_criteria.get("centers_must_include"):
+                centers = candidate.get("centers", "").lower()
+                location = candidate.get("location", "").lower()
+                all_locations = f"{centers} {location}"
+                
+                location_match = any(
+                    center.lower() in all_locations 
+                    for center in mandatory_criteria["centers_must_include"]
+                )
+                if not location_match:
+                    continue
+            
+            # If we reach here, candidate passed all mandatory criteria
+            filtered_candidates.append(candidate)
+        
+        return filtered_candidates
 
     def _create_searchable_text(self, speaker: Dict[str, Any]) -> str:
         """Create searchable text from speaker data"""
@@ -395,34 +546,6 @@ class VectorDatabase:
         metadata['added_at'] = datetime.now().isoformat()
 
         return metadata
-
-    def _build_where_clause(self, filters: Dict[str, Any]) -> Dict[str, Any]:
-        """Build ChromaDB where clause from filters"""
-
-        where_clause = {}
-
-        # Handle text filters
-        for field in ['location', 'company']:
-            if filters.get(field):
-                where_clause[field] = {"$eq": filters[field]}
-
-        # Handle numeric filters
-        if filters.get('min_experience'):
-            where_clause['years_experience'] = {"$gte": float(filters['min_experience'])}
-
-        if filters.get('max_experience'):
-            if 'years_experience' in where_clause:
-                where_clause['years_experience']["$lte"] = float(filters['max_experience'])
-            else:
-                where_clause['years_experience'] = {"$lte": float(filters['max_experience'])}
-
-        # Handle list filters (using contains)
-        for field in ['speaking_topics', 'specializations', 'audiences']:
-            if filters.get(field):
-                # For comma-separated strings, we can use contains
-                where_clause[field] = {"$contains": filters[field]}
-
-        return where_clause if where_clause else None
 
     async def get_collection_stats(self) -> Dict[str, Any]:
         """Get statistics about the vector database"""

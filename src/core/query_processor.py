@@ -15,28 +15,28 @@ logger = logging.getLogger(__name__)
 
 class QueryProcessor:
     """Processes natural language queries for speaker search - Simplified approach"""
-    
+
     def __init__(self):
         pass
-    
+
     async def process_query(self, query: str) -> Dict[str, Any]:
         """Process a natural language query and extract search parameters"""
-        
+
         logger.info(f"Processing query: {query}")
-        
+
         # Basic cleaning - just trim whitespace
         cleaned_query = query.strip()
-        
+
         # STEP 1: Enhance the query with LLM for better search results
         enhanced_query = await self.enhance_query_with_llm(cleaned_query)
         logger.info(f"Enhanced query: {enhanced_query}")
-        
+
         # STEP 2: Use enhanced query for LLM analysis
         llm_analysis = await self._analyze_query_with_llm(enhanced_query)
-        
+
         # STEP 3: Generate query embedding using enhanced query
         query_embedding = await self._generate_query_embedding(enhanced_query)
-        
+
         # Create search parameters
         search_params = {
             'original_query': query,
@@ -47,45 +47,49 @@ class QueryProcessor:
             'boost_factors': self._create_boost_factors(llm_analysis),
             'timestamp': datetime.now().isoformat()
         }
-        
+
         logger.info(f"Query processing complete - Primary intent: {llm_analysis.get('intent', 'unknown')}")
-        
+
         return search_params
-    
+
     async def _analyze_query_with_llm(self, query: str) -> Dict[str, Any]:
-        """Use LLM to analyze query and extract entities/intent"""
-        
+        """Use LLM to analyze query and extract entities/intent with mandatory criteria"""
+
         system_prompt = """Detailed thinking off. You are a highly intelligent query analysis engine for a speaker search system. Your sole purpose is to analyze a user's query and convert it into a structured JSON object.
-            **Instructions:**
-            1.  **Analyze the query:** Carefully examine the user's request to understand their needs.
-            2.  **Extract entities:** Populate the fields in the JSON structure below based on the query.
-            3.  **Be precise:** If a specific entity (like a technology or industry) is not mentioned, leave the corresponding list empty.
-            4.  **Guardrail:** Do NOT invent or infer any information not explicitly present in the query.
-            5.  **Intent:** The 'intent' field should be a concise summary of the user's goal.
-            6.  **Expertise:** The 'expertise' field should contain the key subjects or skills the user is looking for. If the query is broad, use the most relevant nouns and concepts.
-    
-            **Output Format:**
-            - You MUST return ONLY a valid JSON object.
-            - Do not include any explanations, markdown formatting, or any text outside of the JSON structure.
-    
-            **JSON Structure:**
-            {
-              "intent": "A concise summary of the user's goal.",
-              "technologies": ["List of specific technologies, frameworks, or products mentioned."],
-              "industries": ["List of industries mentioned (e.g., 'healthcare', 'finance')."],
-              "audiences": ["List of audience types mentioned (e.g., 'executives', 'technical', 'developers')."],
-              "expertise": ["List of key subjects, skills, or topics requested."],
-              "roles": ["List of job titles or roles mentioned (e.g., 'CTO', 'engineer')."]
-            }"""
-        
+
+**Instructions:**
+1. **Analyze the query:** Carefully examine the user's request to understand their needs.
+2. **Identify Mandatory Criteria:** Pay close attention to words like "must have," "required," "needs to be," "in [location]," "from [location]," or specific job titles, centers/locations, and technologies that are stated as requirements.
+3. **Extract Entities:** Populate the fields in the JSON structure below.
+4. **Be Precise:** If a specific entity is not mentioned, leave the corresponding list/field empty. Do NOT invent information.
+5. **Location Keywords:** Look for location indicators like "North America", "Santa Clara", "HQ", city names, country names, regions.
+6. **Job Title Keywords:** Look for specific roles like "architect", "director", "VP", "manager", "lead", etc.
+7. **Topic Requirements:** Identify specific technologies, domains, or subjects that are explicitly requested.
+
+**Output Format:**
+- You MUST return ONLY a valid JSON object.
+
+**JSON Structure:**
+{
+  "intent": "A concise summary of the user's goal.",
+  "expertise_keywords": ["List of general subjects, skills, or topics requested for semantic search."],
+  "mandatory_criteria": {
+    "job_title_contains": ["List of keywords that MUST be in the job title, e.g., 'architect', 'director', 'VP', 'manager'."],
+    "topics_must_include": ["List of topics that the speaker MUST cover, e.g., 'GPU', 'AI', 'cybersecurity'."],
+    "centers_must_include": ["List of required locations/centers, e.g., 'North America', 'Santa Clara', 'HQ'."]
+  }
+}"""
+
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Query to analyze: {query}"}
+            {"role": "user", "content": f"Query to analyze: {query}"},
         ]
-        
+
         try:
-            response = await nvidia_client.generate_llm_response(messages, max_tokens=300)
-            
+            response = await nvidia_client.generate_llm_response(
+                messages, max_tokens=300
+            )
+
             if response.success and response.content:
                 # Try to parse JSON response
                 try:
@@ -93,46 +97,49 @@ class QueryProcessor:
                     logger.info(f"LLM analysis successful: {analysis}")
                     return analysis
                 except json.JSONDecodeError:
-                    logger.warning(f"Failed to parse LLM response as JSON: {response.content}")
+                    logger.warning(
+                        f"Failed to parse LLM response as JSON: {response.content}"
+                    )
                     return self._fallback_analysis(query)
             else:
                 logger.warning(f"LLM analysis failed: {response.error}")
                 return self._fallback_analysis(query)
-                
+
         except Exception as e:
             logger.error(f"Error in LLM analysis: {e}")
             return self._fallback_analysis(query)
-    
+
     def _fallback_analysis(self, query: str) -> Dict[str, Any]:
         """Fallback analysis when LLM fails"""
         return {
             "intent": "find relevant speakers",
-            "technologies": [],
-            "industries": [],
-            "audiences": [],
-            "expertise": [query],  # Use the whole query as expertise
-            "roles": []
+            "expertise_keywords": [query],
+            "mandatory_criteria": {
+                "job_title_contains": [],
+                "topics_must_include": [],
+                "centers_must_include": [],
+            },
         }
-    
+
     async def _generate_query_embedding(self, query: str) -> Optional[List[float]]:
         """Generate embedding for the query"""
-        
+
         try:
             response = await nvidia_client.generate_embeddings([query], input_type="query")  # Use "query" for search queries
-            
+
             if response.success and response.embeddings:
                 return response.embeddings[0]
             else:
                 logger.warning(f"Failed to generate query embedding: {response.error}")
                 return None
-                
+
         except Exception as e:
             logger.error(f"Error generating query embedding: {e}")
             return None
-    
+
     def _create_boost_factors(self, llm_analysis: Dict[str, Any]) -> Dict[str, float]:
         """Create boost factors based on LLM analysis"""
-        
+
         # Base boost factors
         boost_factors = {
             'bio': 1.0,
@@ -144,34 +151,34 @@ class QueryProcessor:
             'work_experience': 1.1,
             'certifications': 1.3
         }
-        
+
         # Adjust based on what was found in the query
         if llm_analysis.get('technologies'):
             boost_factors['specializations'] *= 1.4
             boost_factors['work_experience'] *= 1.3
-        
+
         if llm_analysis.get('audiences'):
             boost_factors['audiences'] *= 2.0
             boost_factors['job_title'] *= 1.3
-        
+
         if llm_analysis.get('expertise'):
             boost_factors['speaking_topics'] *= 1.4
             boost_factors['primary_topics'] *= 1.3
             boost_factors['specializations'] *= 1.2
-        
+
         if llm_analysis.get('industries'):
             boost_factors['work_experience'] *= 1.4
             boost_factors['bio'] *= 1.2
-        
+
         if llm_analysis.get('roles'):
             boost_factors['job_title'] *= 1.5
-        
+
         return boost_factors
-    
+
     async def enhance_query_with_llm(self, query: str) -> str:
         """Use LLM to enhance and expand the query for better speaker search results"""
-        
-        system_prompt = """<no_think>. Detailed thinking off. You are a query enhancement specialist for a professional speaker search system. Your task is to expand and enrich user queries to maximize search effectiveness while maintaining the original intent.
+
+        system_prompt = """Detailed thinking off. You are a query enhancement specialist for a professional speaker search system. Your task is to expand and enrich user queries to maximize search effectiveness while maintaining the original intent.
 
     **Enhancement Strategy:**
     1. **Preserve Original Intent**: Keep the core meaning and requirements intact
@@ -197,15 +204,15 @@ class QueryProcessor:
     Output: "Technical speakers and experts in GPUs, CUDA, high-performance computing, and parallel processing with experience presenting on artificial intelligence, machine learning, deep learning, and neural networks to professional and technical audiences"
 
     Return only the enhanced query text and nothing else. There is no need to return any explanations or additional information or any follow-up."""
-        
+
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Enhance this speaker search query: <no_think> {query}"}
         ]
-        
+
         try:
             response = await nvidia_client.generate_llm_response(messages, max_tokens=150)
-            
+
             if response.success and response.content:
                 enhanced_query = response.content.strip()
                 logger.info(f"Query enhanced from '{query}' to '{enhanced_query}'")
@@ -213,16 +220,16 @@ class QueryProcessor:
             else:
                 logger.warning(f"Failed to enhance query: {response.error}")
                 return query
-                
+
         except Exception as e:
             logger.error(f"Error enhancing query: {e}")
             return query
-    
+
     def get_query_suggestions(self, partial_query: str) -> List[str]:
         """Get simple query suggestions based on partial input"""
-        
+
         suggestions = []
-        
+
         # Simple predefined suggestions
         common_patterns = [
             "Find speakers with expertise in",
@@ -233,10 +240,10 @@ class QueryProcessor:
             "Find speakers from industry",
             "Who has experience with"
         ]
-        
+
         # Add relevant suggestions based on partial query
         partial_lower = partial_query.lower()
-        
+
         if 'cloud' in partial_lower:
             suggestions.extend([
                 "cloud computing experts",
@@ -257,7 +264,7 @@ class QueryProcessor:
             ])
         else:
             suggestions.extend(common_patterns[:5])
-        
+
         return suggestions[:8]  # Return top 8 suggestions
 
 # Global query processor instance

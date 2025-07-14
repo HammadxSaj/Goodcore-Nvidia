@@ -75,7 +75,7 @@ async def _is_query_relevant(query: str) -> tuple[bool, str]:
     Uses an LLM to check if a query is a relevant request for finding a speaker.
     Returns (is_relevant, error_message) tuple.
     """
-    system_prompt = """You are a security and relevance guard for a speaker search system. 
+    system_prompt = """detailed thinking off. You are a security and relevance guard for a speaker search system. 
 
 Your ONLY job is to classify user queries and provide context. Respond with JSON containing:
 1. "classification" - either "valid_speaker_request" or "irrelevant_request"
@@ -274,6 +274,10 @@ async def search_speakers(search_query: SearchQuery):
         query_analysis = query_params.get("llm_analysis", {})
         query_embedding = query_params.get("query_embedding")
 
+        # Extract the mandatory filters from the analysis
+        mandatory_filters = query_analysis.get("mandatory_criteria", {})
+        logger.info(f"Extracted mandatory filters: {mandatory_filters}")
+
         if not query_embedding:
             return ErrorResponse(
                 message="I'm having trouble understanding your query right now. Please try rephrasing your speaker search request.",
@@ -284,13 +288,50 @@ async def search_speakers(search_query: SearchQuery):
             f"Query processed - Intent: {query_analysis.get('intent', 'unknown')}"
         )
 
-        # Phase 2: Perform hybrid search (like in test)
+        # Phase 2: Perform hybrid search with mandatory filters
+        logger.info(
+            f"🔍 DEBUG: Calling hybrid_search with limit={search_query.max_results}"
+        )
         search_results = await vector_db.hybrid_search(
             query_embedding=query_embedding,
             query_text=query_params.get("enhanced_query", search_query.query),
-            filters=None,
+            filters=mandatory_filters,  # Pass the extracted filters here
             limit=search_query.max_results,
         )
+
+        logger.info(
+            f"🔍 DEBUG: Hybrid search returned {len(search_results.get('candidates', []))} candidates"
+        )
+
+        # Check if we need to implement fallback logic
+        search_had_filters = (
+            any(mandatory_filters.get(key) for key in mandatory_filters.keys())
+            if mandatory_filters
+            else False
+        )
+        search_was_successful = search_results["success"]
+        results_found = len(search_results.get("candidates", [])) > 0
+
+        explanation_prefix = ""
+
+        if search_was_successful and not results_found and search_had_filters:
+            logger.warning(
+                f"Strict search for '{search_query.query}' yielded no results. Retrying with semantic search only."
+            )
+
+            # Re-run the search WITHOUT filters
+            search_results = await vector_db.hybrid_search(
+                query_embedding=query_embedding,
+                query_text=query_params.get("enhanced_query", search_query.query),
+                filters=None,  # No filters this time
+                limit=search_query.max_results,
+            )
+
+            # Add a note for the user in the explanation
+            explanation_prefix = "Your search included specific criteria that returned no exact matches. The results below are the closest semantic matches based on your query. "
+            logger.info(
+                f"🔍 DEBUG: Fallback search returned {len(search_results.get('candidates', []))} candidates"
+            )
 
         if not search_results["success"]:
             return ErrorResponse(
@@ -381,7 +422,7 @@ YOU MUST ABIDE BY THE FOLLOWING FORMAT:
 }"""
 
             user_prompt_for_shortlisting = f"""
-**User Query:** "{query_params.get('enhanced_query', search_query.query)}"
+**User Query:** "{search_query.query}"
 
 **Candidate Speakers:**
 {shortlist_context}
@@ -442,7 +483,7 @@ Please analyze these candidates and return the JSON shortlist of the best fits."
 5.  **Tone:** Be concise, professional, and direct.
 
 **Output Format:**
-- You MUST use the following Markdown structure. Do not add any other text OR FOLLOW UP OR ANY EXPLANATION.
+- You MUST use the following Markdown structure. Do not add any other text.
 ### Analysis
 (Your 2-3 sentence high-level analysis of the group here)
 
@@ -453,13 +494,13 @@ Please analyze these candidates and return the JSON shortlist of the best fits."
         # Create a concise context string for the LLM using final_speaker_results
         speaker_context = "\n".join(
             [
-                f"- **{s.name}** ({s.job_title}): Specializes in {s.specializations or 'N/A'}. Key topics: {', '.join(s.speaking_topics) if s.speaking_topics else 'Not specified'}."
+                f"- **{s.name}** ({s.job_title}): Specializes in {s.specializations or 'N/A'}. Key topics: {', '.join(s.speaking_topics[:3]) if s.speaking_topics else 'Not specified'}."
                 for s in final_speaker_results
             ]
         )
 
         user_prompt = f"""
-**User Query:** "{query_params.get('enhanced_query', search_query.query)}"
+**User Query:** "{search_query.query}"
 
 **Search Results:**
 {speaker_context}
@@ -490,12 +531,14 @@ Please generate the analysis and recommendation based on these results.
                 rec_part = parts[1].strip()
 
                 if exp_part:
-                    explanation = exp_part
+                    explanation = (
+                        explanation_prefix + exp_part
+                    )  # Add prefix if fallback was used
                 if rec_part:
                     recommendation = rec_part
             else:
                 # Fallback if the model doesn't follow instructions perfectly
-                explanation = llm_content.strip()
+                explanation = explanation_prefix + llm_content.strip()
 
         # Calculate search time
         search_time = int((datetime.now() - start_time).total_seconds() * 1000)
