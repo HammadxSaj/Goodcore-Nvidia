@@ -27,16 +27,21 @@ class QueryProcessor:
         # Basic cleaning - just trim whitespace
         cleaned_query = query.strip()
         
-        # Use LLM to extract entities and intent
-        llm_analysis = await self._analyze_query_with_llm(cleaned_query)
+        # STEP 1: Enhance the query with LLM for better search results
+        enhanced_query = await self.enhance_query_with_llm(cleaned_query)
+        logger.info(f"Enhanced query: {enhanced_query}")
         
-        # Generate query embedding
-        query_embedding = await self._generate_query_embedding(cleaned_query)
+        # STEP 2: Use enhanced query for LLM analysis
+        llm_analysis = await self._analyze_query_with_llm(enhanced_query)
+        
+        # STEP 3: Generate query embedding using enhanced query
+        query_embedding = await self._generate_query_embedding(enhanced_query)
         
         # Create search parameters
         search_params = {
             'original_query': query,
             'cleaned_query': cleaned_query,
+            'enhanced_query': enhanced_query,  # Add enhanced query to results
             'llm_analysis': llm_analysis,
             'query_embedding': query_embedding,
             'boost_factors': self._create_boost_factors(llm_analysis),
@@ -164,31 +169,42 @@ class QueryProcessor:
         return boost_factors
     
     async def enhance_query_with_llm(self, query: str) -> str:
-        """Use LLM to enhance and expand the query"""
+        """Use LLM to enhance and expand the query for better speaker search results"""
         
-        system_prompt = """You are a query enhancement assistant for a speaker search system. 
-        Enhance the user's query by adding relevant synonyms, related terms, and technical keywords.
-        
-        Rules:
-        1. Keep the original meaning and intent
-        2. Add relevant synonyms and related terms
-        3. Include technical keywords that would help find speakers
-        4. Make it more comprehensive for search
-        5. Keep response under 100 words
-        
-        Return only the enhanced query text, nothing else."""
+        system_prompt = """You are a query enhancement specialist for a professional speaker search system. Your task is to expand and enrich user queries to maximize search effectiveness while maintaining the original intent.
+
+    **Enhancement Strategy:**
+    1. **Preserve Original Intent**: Keep the core meaning and requirements intact
+    2. **Add Technical Synonyms**: Include related technical terms, frameworks, and technologies
+    3. **Professional Language**: Use formal language that matches speaker bios and professional profiles
+    4. **Broaden Scope Intelligently**: Add closely related topics that speakers might cover
+    5. **Include Presentation Context**: Add terms related to speaking, presenting, and knowledge sharing
+
+    **Guidelines:**
+    - Transform casual language into professional terminology
+    - Add industry-standard terms and acronyms
+    - Include related technologies and methodologies
+    - Mention presentation and communication skills when relevant
+    - Keep the enhanced query under 80 words
+    - Focus on terms likely to appear in speaker profiles and bios
+
+    **Example:**
+    Input: "GPU experts with experience delivering briefings on AI topics"
+    Output: "Technical speakers and experts in GPUs, CUDA, high-performance computing, and parallel processing with experience presenting on artificial intelligence, machine learning, deep learning, and neural networks to professional and technical audiences"
+
+    Return only the enhanced query text."""
         
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Enhance this query: {query}"}
+            {"role": "user", "content": f"Enhance this speaker search query: {query}"}
         ]
         
         try:
-            response = await nvidia_client.generate_llm_response(messages, max_tokens=200)
+            response = await nvidia_client.generate_llm_response(messages, max_tokens=150)
             
             if response.success and response.content:
                 enhanced_query = response.content.strip()
-                logger.info(f"Enhanced query: {enhanced_query}")
+                logger.info(f"Query enhanced from '{query}' to '{enhanced_query}'")
                 return enhanced_query
             else:
                 logger.warning(f"Failed to enhance query: {response.error}")
