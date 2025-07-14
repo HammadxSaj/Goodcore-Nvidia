@@ -4,13 +4,15 @@ This project is an advanced, AI-powered speaker search and recommendation system
 
 ## Technical Flow Diagram
 
-The following diagram illustrates the complete end-to-end architecture and data flow of the application, from initial data processing to the final user-facing recommendation.
+The following diagram illustrates the complete end-to-end architecture and data flow of the application, including the initial relevance guardrail.
 
-![Technical Flow Diagram](flow_diagram_v5.png)
+![Technical Flow Diagram](flow_diagram_final.png)
 
 ---
 
 ## Core Concepts
+
+- **Relevance Guardrail:** Before any processing occurs, an initial LLM call classifies the user's query. If the query is irrelevant to finding a speaker (e.g., chit-chat, nonsensical questions), the system politely declines the request. This ensures efficiency, focuses the system on its core task, and provides a safer user experience.
 
 - **Retrieval-Augmented Generation (RAG):** The system doesn't rely solely on a Large Language Model (LLM) to answer queries. Instead, it first *retrieves* relevant information (speaker profiles) from a specialized data source (a vector database) and then uses the LLM to *augment* this data with explanations and recommendations. This approach ensures answers are grounded in factual data and reduces model "hallucinations."
 
@@ -140,6 +142,17 @@ This is the primary endpoint for searching for speakers.
       },
       "total_results": 5,
       "search_time_ms": 1234
+    }
+    ```
+
+-   **Error Response for Irrelevant Query (200 OK):**
+    If the relevance guardrail is triggered, the API returns a structured error.
+
+    ```json
+    {
+        "error": true,
+        "message": "I'm a speaker search assistant, not a calculator. I'd be happy to help you find speakers who specialize in mathematics, data science, or analytics for your event though!",
+        "suggestion": "Try asking about speakers for specific topics like 'AI experts', 'marketing professionals', or 'healthcare speakers'."
     }
     ```
 
