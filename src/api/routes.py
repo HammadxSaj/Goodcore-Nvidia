@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # Pydantic models for API
 class SearchQuery(BaseModel):
     query: str
-    max_results: int = 10
+    max_results: int = 15
 
 
 class SpeakerResult(BaseModel):
@@ -373,7 +373,6 @@ async def search_speakers(search_query: SearchQuery):
             centers_value = candidate.get("centers", candidate.get("metadata", {}).get("centers", ""))
             logger.info(f"DEBUG - Centers value for {candidate.get('name', 'Unknown')}: '{centers_value}'")
 
-
             speaker_result = SpeakerResult(
                 speaker_id=str(speaker_id),
                 name=candidate.get(
@@ -406,7 +405,7 @@ async def search_speakers(search_query: SearchQuery):
             # Create a concise context of the candidates for the LLM
             shortlist_context = "\n".join(
                 [
-                    f"ID: {s.speaker_id}, Name: {s.name}, Title: {s.job_title}, Company: {s.company or 'N/A'}, Bio: {(s.bio + '...') if s.bio else s.bio or 'N/A'}, Topics: {', '.join(s.speaking_topics) if s.speaking_topics else 'N/A'}, Specializations: {s.specializations or 'N/A'}"
+                    f"ID: {s.speaker_id}, Name: {s.name}, Title: {s.job_title}, Company: {s.company or 'N/A'}, Bio: {(s.bio + '...') if s.bio else s.bio or 'N/A'}, Topics: {', '.join(s.speaking_topics) if s.speaking_topics else 'N/A'}, Specializations: {s.specializations or 'N/A'}, Audiences: {s.audiences or 'N/A'}, Centers: {s.centers or 'N/A'}"
                     for s in speaker_results
                 ]
             )
@@ -415,17 +414,18 @@ async def search_speakers(search_query: SearchQuery):
 
 **Instructions:**
 1. **Review the Query:** Carefully consider the user's original request.
-2. **Analyze the Candidates:** Examine the provided list of up to 10 speaker profiles.
-3. **Select the Best:** Choose a variable number of speakers who are the strongest match. Do not feel obligated to select all of them. Quality is more important than quantity. If only 3 are a great fit, select only 3.
+2. **Analyze the Candidates:** Examine the provided list of up to 15 speaker profiles.
+3. **Select the Best:** Choose a variable number of speakers who are the strongest match. Do not feel obligated to select all of them. Quality is more important than quantity. If only 3 are a great fit, select only 3. If only 1 is a great fit, select only 1.
 4. **Must match certain criteria:** Ensure that the selected speakers meet the following:
     - There must be mention of the specific topic in their profile as mentioned in the query.
     - They should have relevant expertise or experience in the area.
-    - There center location should match the user's query.
+    - There center location should match the user's query. i.e if the query mentions that they need speakers based in Bangalore then the speakers' center must be based in Bangalore. same for Santa Clara etc etc. There is a chance that the user might mention some place
+    like New york, so based on gerographical proximity you can shrotlist people based in Santa Clara.
     - If there is any mention of a specific audience (e.g., executives, technical teams), they should be suitable for that audience.
     - if there is any mention of specialization, certification, or specific skills, they should have those qualifications.
     - if there is any mention of a specific role (e.g., technical speaker, executive presenter), they should fit that role.
     - if there is any mention of a certain experience level or years of experience, they should meet that requirement.
-    **MUST**: The above criteria MUST be met for each speaker you select.
+    **MUST**: The above criteria MUST be met for each speaker you select. Specifically the one on location/centers.
 4. **Provide Justification:** For each speaker you select, provide a brief, one-sentence justification for why they are a good fit.
 5. **Return JSON:** Your output MUST be a single, valid JSON object containing a list named "shortlist". Each item in the list should be an object with "speaker_id" and "justification".
 
@@ -436,11 +436,11 @@ YOU MUST ABIDE BY THE FOLLOWING FORMAT:
   "shortlist": [
     {
       "speaker_id": "12345",
-      "justification": "This speaker's deep experience in cloud security directly matches the core of the user's request."
+      "justification": "This speaker's deep experience in cloud security along with their talks on AI in cybersecurity and being based in Santa Clara make them a perfect fit for the user's request."
     },
     {
       "speaker_id": "67890",
-      "justification": "Offers a high-level, strategic perspective on the topic, which is perfect for a business audience."
+      "justification": "Offers a high-level, strategic perspective on the topic, which is perfect for a business audience or c-suite executives. They also have extensive experience in digital transformation and have spoken on multiple topics on cloud computing."
     }
   ]
 }"""
@@ -451,7 +451,7 @@ YOU MUST ABIDE BY THE FOLLOWING FORMAT:
 **Candidate Speakers:**
 {shortlist_context}
 
-Please analyze these candidates and return the JSON shortlist of the best fits."""
+Please analyze these candidates and return the JSON shortlist of the best fits that must match the criterias mentioned."""
 
             shortlisting_response = await generate_llm_response(
                 [
@@ -507,6 +507,9 @@ Please analyze these candidates and return the JSON shortlist of the best fits."
 4.  **Guardrail:** Base your analysis STRICTLY on the provided speaker information. Do not invent or infer details not present in the context.
 5.  **Tone:** Be concise, professional, and direct.
 
+IF THERE IS NO SPEAKER FOUND, you MUST return a message like this:
+"Unfortunately, I could not find any speakers matching your criteria. Please try broadening your search or consider different topics or expertise areas."
+
 **Output Format:**
 - You MUST use the following Markdown structure. Do not add any other text.
 ### Analysis
@@ -519,7 +522,7 @@ Please analyze these candidates and return the JSON shortlist of the best fits."
         # Create a concise context string for the LLM using final_speaker_results
         speaker_context = "\n".join(
             [
-                f"- **{s.name}** ({s.job_title}): Specializes in {s.specializations or 'N/A'}. Key topics: {', '.join(s.speaking_topics[:3]) if s.speaking_topics else 'Not specified'}."
+                f"ID: {s.speaker_id}, Name: {s.name}, Title: {s.job_title}, Company: {s.company or 'N/A'}, Bio: {(s.bio + '...') if s.bio else s.bio or 'N/A'}, Topics: {', '.join(s.speaking_topics) if s.speaking_topics else 'N/A'}, Specializations: {s.specializations or 'N/A'}, Audiences: {s.audiences or 'N/A'}, Centers: {s.centers or 'N/A'}"
                 for s in final_speaker_results
             ]
         )

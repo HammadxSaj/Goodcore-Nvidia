@@ -186,14 +186,15 @@ class QueryProcessor:
     3. **Professional Language**: Use formal language that matches speaker bios and professional profiles
     4. **Broaden Scope Intelligently**: Add closely related topics that speakers might cover
     5. **Include Presentation Context**: Add terms related to speaking, presenting, and knowledge sharing
+    6. **MUST ENFORCE**: You must ensure that the mention of specific topics, experiences, roles, titles, locations/centers, are ENFORCED in the enhanced query with the mention that these must be there.
 
     **Guidelines:**
     - Transform casual language into professional terminology
     - Add industry-standard terms and acronyms
     - Include related technologies and methodologies
     - Mention presentation and communication skills when relevant
-    - Keep the enhanced query under 80 words
     - Focus on terms likely to appear in speaker profiles and bios
+    - Enforce the mention of specific topics, experiences, roles, titles, locations/centers, and ensure they are included in the enhanced query.
 
     Keep in mind that the purpose of the entire system is to find the best speakers based on user queries. 
     The enhanced query should be comprehensive yet concise, ensuring it captures all relevant aspects of the user's request.
@@ -211,7 +212,7 @@ class QueryProcessor:
         ]
 
         try:
-            response = await nvidia_client.generate_llm_response(messages, max_tokens=150)
+            response = await nvidia_client.generate_llm_response(messages)
 
             if response.success and response.content:
                 enhanced_query = response.content.strip()

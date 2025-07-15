@@ -267,9 +267,9 @@ class VectorDatabase:
                         basic_filters[key] = value
 
             # Build ChromaDB-compatible where clause (only basic filters)
-            where_clause = self._build_basic_where_clause(basic_filters)
+            #where_clause = self._build_basic_where_clause(basic_filters)
             
-            logger.info(f"Vector search with basic filters: {where_clause}")
+            #logger.info(f"Vector search with basic filters: {where_clause}")
             logger.info(f"Post-filtering with mandatory criteria: {mandatory_criteria}")
 
             # Step 1: Vector search with basic filters only
@@ -280,7 +280,7 @@ class VectorDatabase:
             
             results = collection.query(
                 query_embeddings=[query_embedding],
-                where=where_clause,
+                #where=where_clause,
                 n_results=search_limit,
                 include=["documents", "metadatas", "distances"]
             )
