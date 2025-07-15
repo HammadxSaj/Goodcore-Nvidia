@@ -1,18 +1,18 @@
 """
-Main Streamlit application for Speaker Preference AI
+Conversational Streamlit application for Speaker Preference AI
 """
 
 import streamlit as st
 import requests
 import json
 import time
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 
 from components.speaker_table import display_speaker_table
 
 # Configure Streamlit page
 st.set_page_config(
-    page_title="Speaker Preference AI",
+    page_title="Conversational Speaker AI",
     page_icon="🎤",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -20,6 +20,63 @@ st.set_page_config(
 
 # API Configuration
 API_BASE_URL = "http://localhost:8000/api/v1"
+
+
+# --- State Management Initialization ---
+def initialize_session_state():
+    """Initialize session state variables if they don't exist."""
+    if "conversation_history" not in st.session_state:
+        st.session_state.conversation_history = []
+    if "displayed_speakers" not in st.session_state:
+        st.session_state.displayed_speakers = []
+    if "last_query_analysis" not in st.session_state:
+        st.session_state.last_query_analysis = {}
+    if "last_explanation" not in st.session_state:
+        st.session_state.last_explanation = ""
+    if "last_recommendation" not in st.session_state:
+        st.session_state.last_recommendation = ""
+    if "is_first_search" not in st.session_state:
+        st.session_state.is_first_search = True
+
+
+# --- API Communication ---
+def call_search_api(
+    query: str, history: List[Dict[str, str]]
+) -> Optional[Dict[str, Any]]:
+    """Call the backend search API for initial searches."""
+    try:
+        payload = {"query": query, "max_results": 15, "conversation_history": history}
+        response = requests.post(f"{API_BASE_URL}/search", json=payload, timeout=60)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"API Error: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Failed to connect to API: {e}")
+        return None
+
+
+def call_refine_api(
+    query: str, history: List[Dict[str, str]], current_speakers: List[Dict]
+) -> Optional[Dict[str, Any]]:
+    """Call the backend refine API for conversational refinements."""
+    try:
+        payload = {
+            "query": query,
+            "max_results": 15,
+            "conversation_history": history,
+            "current_speakers": current_speakers,
+        }
+        response = requests.post(f"{API_BASE_URL}/refine", json=payload, timeout=60)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Refine API Error: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Failed to connect to refine API: {e}")
+        return None
 
 
 def check_api_health() -> bool:
@@ -34,160 +91,164 @@ def check_api_health() -> bool:
         return False
 
 
-def get_system_stats() -> Dict[str, Any]:
-    """Get system statistics"""
-    try:
-        response = requests.get(f"{API_BASE_URL}/stats", timeout=5)
-        if response.status_code == 200:
-            return response.json()
-        return {}
-    except Exception:
-        return {}
+def detect_search_type(prompt: str, has_current_speakers: bool) -> str:
+    """Determine if this should be a new search or refinement"""
+    if not has_current_speakers:
+        return "new_search"
+
+    # Keywords that suggest refinement rather than new search
+    refinement_keywords = [
+        "remove",
+        "delete",
+        "take out",
+        "eliminate",
+        "only show",
+        "filter",
+        "narrow down",
+        "from",
+        "based in",
+        "located in",
+        "in the region",
+        "first",
+        "top",
+        "best",
+        "except",
+        "without",
+    ]
+
+    prompt_lower = prompt.lower()
+    if any(keyword in prompt_lower for keyword in refinement_keywords):
+        return "refinement"
+
+    # Default to new search for clarity
+    return "new_search"
 
 
-def search_speakers(query: str, max_results: int = 10) -> Dict[str, Any]:
-    """Search for speakers using the API"""
-    try:
-        payload = {"query": query, "max_results": max_results}
-
-        response = requests.post(f"{API_BASE_URL}/search", json=payload, timeout=60)
-
-        if response.status_code == 200:
-            return response.json()
+def convert_speakers_for_api(speakers: List[Dict]) -> List[Dict]:
+    """Convert SpeakerResult objects to dict format for API"""
+    converted = []
+    for speaker in speakers:
+        if hasattr(speaker, "__dict__"):
+            # It's a Pydantic model, convert to dict
+            converted.append(speaker.__dict__)
         else:
-            st.error(f"Search failed: {response.status_code} - {response.text}")
-            return {}
-
-    except Exception as e:
-        st.error(f"Error searching speakers: {str(e)}")
-        return {}
+            # It's already a dict
+            converted.append(speaker)
+    return converted
 
 
+# --- Main Application Logic ---
 def main():
-    """Main Streamlit application"""
+    """Main Streamlit application flow."""
+    st.title("🎤 Conversational Speaker Preference AI")
+    st.markdown("### Find the perfect speakers for your event through conversation.")
 
-    # Header
-    st.title("🎤 Speaker Preference AI")
-    st.markdown("### Find the Perfect Speakers for Your Event")
-    st.markdown("---")
-
-    # Check API health
+    # Check API health first
     if not check_api_health():
-        st.error("🚨 **API Service Unavailable**")
-        st.info("Please ensure the FastAPI server is running on http://localhost:8000")
-
-        with st.expander("🔧 How to Start the API Server"):
-            st.code(
-                """
-# In your terminal, navigate to the project root and run:
-cd src/api
-python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
-
-# Or alternatively:
-python src/api/main.py
-            """
-            )
+        st.error("🚨 **Backend Service Not Ready**")
+        st.info("Please ensure the FastAPI server is running and fully initialized.")
         st.stop()
 
-    # System stats in sidebar
-    with st.sidebar:
-        st.header("📊 System Status")
-        stats = get_system_stats()
-        if stats:
-            st.metric("Total Speakers", stats.get("total_speakers", 0))
-            st.write(f"**Database:** {stats.get('collection_name', 'Unknown')}")
-        else:
-            st.write("Stats unavailable")
+    initialize_session_state()
 
-    # Main search interface
-    st.subheader("🔍 Search for Speakers")
+    # Display the chat history
+    for message in st.session_state.conversation_history:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-    # Search input
-    query = st.text_input(
-        "Enter your search query:",
-        placeholder="e.g., 'cloud computing experts', 'data center specialists', 'executive speakers with business focus'",
-        help="Describe what kind of speaker you're looking for. Be as specific as possible about topics, expertise, or audience type.",
-    )
-
-    # Search button
-    if st.button("🔍 Search Speakers", type="primary", use_container_width=True):
-        if query.strip():
-            with st.spinner(
-                "🤖 AI is analyzing your query and finding the best speakers..."
-            ):
-                # Perform search
-                results = search_speakers(query.strip())
-
-                if results:
-                    # Store results in session state
-                    st.session_state["search_results"] = results
-                    st.session_state["last_query"] = query.strip()
-                else:
-                    st.error("No results found. Please try a different query.")
-        else:
-            st.warning("Please enter a search query.")
-
-    # Display results if available
-    if "search_results" in st.session_state and st.session_state["search_results"]:
-        results = st.session_state["search_results"]
-
-        # Check if this is an ErrorResponse (irrelevant query)
-        if results.get("error") == True:
-            # Handle ErrorResponse - Show only personalized message
-            st.markdown("---")
-            st.error(f"❌ **{results.get('message', 'Query cannot be processed')}**")
-
-            if results.get("suggestion"):
-                st.info(f"💡 **Suggestion:** {results.get('suggestion')}")
-
-        else:
-            # Handle SearchResponse - Show full results interface
-            st.markdown("---")
-            st.subheader(
-                f"🎯 Search Results for: '{st.session_state.get('last_query', '')}'"
+    # Display the current speaker results if they exist
+    if st.session_state.displayed_speakers:
+        st.markdown("---")
+        st.subheader("Current Speaker Recommendations")
+        if st.session_state.last_explanation:
+            st.markdown(st.session_state.last_explanation)
+        if st.session_state.last_recommendation:
+            st.info(
+                f"**⭐ Top Recommendation:** {st.session_state.last_recommendation}"
             )
 
-            # Search metadata
-            # col1, col2, col3 = st.columns(3)
-            # with col1:
-            #     st.metric("Speakers Found", results.get("total_results", 0))
-            # with col2:
-            #     st.metric("Search Time", f"{results.get('search_time_ms', 0)}ms")
-            # with col3:
-            #     intent = results.get("query_analysis", {}).get("intent", "Unknown")
-            #     st.write(f"**Query Intent:** {intent}")
+        display_speaker_table(st.session_state.displayed_speakers)
 
-            # AI Explanation
-            st.subheader("🧠 AI Analysis & Explanation")
-            explanation = results.get("explanation", "")
-            if explanation:
-                st.markdown(explanation)
+    # User input
+    if prompt := st.chat_input(
+        "What are you looking for? Or, refine your last search."
+    ):
+        # Add user message to history and display it
+        st.session_state.conversation_history.append(
+            {"role": "user", "content": prompt}
+        )
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-            # AI Recommendation
-            recommendation = results.get("recommendation", "")
-            if recommendation:
-                st.subheader("⭐ AI Recommendation")
-                st.info(recommendation)
+        # Determine if this is a new search or refinement
+        search_type = detect_search_type(
+            prompt, bool(st.session_state.displayed_speakers)
+        )
 
-            # Speaker Results Table
-            st.subheader("👥 Speaker Results")
-            speakers = results.get("speakers", [])
-            if speakers:
-                display_speaker_table(speakers)
-            else:
-                st.warning("No speakers found in results.")
+        # Process the user's prompt
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                api_response = None
 
-    # Footer
-    st.markdown("---")
-    st.markdown(
-        """
-        <div style='text-align: center; color: #666;'>
-            <p>🤖 Powered by NVIDIA AI Services | Built with Streamlit & FastAPI</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+                if search_type == "new_search" or st.session_state.is_first_search:
+                    # Use regular search API
+                    api_response = call_search_api(
+                        prompt, st.session_state.conversation_history[:-1]
+                    )
+                    st.session_state.is_first_search = False
+                else:
+                    # Use refinement API
+                    current_speakers_dict = convert_speakers_for_api(
+                        st.session_state.displayed_speakers
+                    )
+                    api_response = call_refine_api(
+                        prompt,
+                        st.session_state.conversation_history[:-1],
+                        current_speakers_dict,
+                    )
+
+                if api_response:
+                    # Check for a structured error from the backend
+                    if api_response.get("error"):
+                        response_content = f"❌ {api_response.get('message', 'I can only help with speaker-related queries.')}"
+                        if api_response.get("suggestion"):
+                            response_content += (
+                                f"\n\n**Suggestion:** {api_response.get('suggestion')}"
+                            )
+                        st.markdown(response_content)
+                        st.session_state.conversation_history.append(
+                            {"role": "assistant", "content": response_content}
+                        )
+                    else:
+                        # It's a successful search result
+                        st.session_state.displayed_speakers = api_response.get(
+                            "speakers", []
+                        )
+                        st.session_state.last_query_analysis = api_response.get(
+                            "query_analysis", {}
+                        )
+                        st.session_state.last_explanation = api_response.get(
+                            "explanation", "Here are the speakers I found."
+                        )
+                        st.session_state.last_recommendation = api_response.get(
+                            "recommendation", ""
+                        )
+
+                        # Add the AI's explanation to chat history and rerun to display results
+                        ai_message = st.session_state.last_explanation
+                        st.session_state.conversation_history.append(
+                            {"role": "assistant", "content": ai_message}
+                        )
+                        st.rerun()
+                else:
+                    # Handle case where API call fails completely
+                    error_message = "I'm having trouble connecting to my services. The search couldn't be updated. Please try again in a moment."
+                    st.markdown(error_message)
+                    st.session_state.conversation_history.append(
+                        {"role": "assistant", "content": error_message}
+                    )
 
 
+# --- Entry Point ---
 if __name__ == "__main__":
     main()

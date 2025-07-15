@@ -19,7 +19,7 @@ class QueryProcessor:
     def __init__(self):
         pass
 
-    async def process_query(self, query: str) -> Dict[str, Any]:
+    async def process_query(self, query: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
         """Process a natural language query and extract search parameters"""
 
         logger.info(f"Processing query: {query}")
@@ -27,12 +27,12 @@ class QueryProcessor:
         # Basic cleaning - just trim whitespace
         cleaned_query = query.strip()
 
-        # STEP 1: Enhance the query with LLM for better search results
-        enhanced_query = await self.enhance_query_with_llm(cleaned_query)
+        # STEP 1: Enhance the query with LLM for better search results (with conversation context)
+        enhanced_query = await self.enhance_query_with_llm(cleaned_query, conversation_history)
         logger.info(f"Enhanced query: {enhanced_query}")
 
-        # STEP 2: Use enhanced query for LLM analysis
-        llm_analysis = await self._analyze_query_with_llm(enhanced_query)
+        # STEP 2: Use enhanced query for LLM analysis (with conversation context)
+        llm_analysis = await self._analyze_query_with_llm(enhanced_query, conversation_history)
 
         # STEP 3: Generate query embedding using enhanced query
         query_embedding = await self._generate_query_embedding(enhanced_query)
@@ -41,7 +41,7 @@ class QueryProcessor:
         search_params = {
             'original_query': query,
             'cleaned_query': cleaned_query,
-            'enhanced_query': enhanced_query,  # Add enhanced query to results
+            'enhanced_query': enhanced_query,
             'llm_analysis': llm_analysis,
             'query_embedding': query_embedding,
             'boost_factors': self._create_boost_factors(llm_analysis),
@@ -52,62 +52,66 @@ class QueryProcessor:
 
         return search_params
 
-    async def _analyze_query_with_llm(self, query: str) -> Dict[str, Any]:
-        """Use LLM to analyze query and extract entities/intent with mandatory criteria"""
+    async def _analyze_query_with_llm(self, current_query: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
+        """Use LLM to analyze the current query in the context of a conversation history."""
+    
+        system_prompt = """Detailed thinking off. You are a highly intelligent query analysis engine for a speaker search system. Your purpose is to analyze a user's latest query by synthesizing it with the entire preceding conversation history to produce a single, consolidated set of search criteria.
 
-        system_prompt = """Detailed thinking off. You are a highly intelligent query analysis engine for a speaker search system. Your sole purpose is to analyze a user's query and convert it into a structured JSON object.
+    **Core Task:**
+    Based on the full `conversation_history` and the `current_query`, determine the user's complete and final intent. A follow-up query like "only the ones from Bangalore" MUST be combined with the previous context (e.g., "find me GPU experts") to form a new, complete search for "GPU experts from Bangalore".
 
-**Instructions:**
-1. **Analyze the query:** Carefully examine the user's request to understand their needs.
-2. **Identify Mandatory Criteria:** Pay close attention to words like "must have," "required," "needs to be," "in [location]," "from [location]," or specific job titles, centers/locations, and technologies that are stated as requirements.
-3. **Extract Entities:** Populate the fields in the JSON structure below.
-4. **Be Precise:** If a specific entity is not mentioned, leave the corresponding list/field empty. Do NOT invent information.
-5. **Location Keywords:** Look for location indicators like "North America", "Santa Clara", "HQ", city names, country names, regions.
-6. **Job Title Keywords:** Look for specific roles like "architect", "director", "VP", "manager", "lead", etc.
-7. **Topic Requirements:** Identify specific technologies, domains, or subjects that are explicitly requested.
+    **Instructions:**
+    1. **Synthesize, Don't Just Analyze:** Do not just analyze the `current_query`. You MUST interpret it based on the `conversation_history`.
+    2. **Consolidate Criteria:** If the user refines their search, merge the new criteria with the old. For example, if they first ask for "AI experts" and then say "who are also VPs", the new `job_title_contains` criteria should be `["VP"]` and the `expertise_keywords` should still contain `["AI"]`.
+    3. **Identify Mandatory Criteria:** Extract strict requirements (specific job titles, locations, required topics) into the `mandatory_criteria` object.
+    4. **Handle Refinements:** If the current query is a refinement like "remove John Smith" or "only show the first 3", this is a UI action and should still preserve the original search intent.
+    5. **Location Keywords:** Look for location indicators like "North America", "Santa Clara", "HQ", city names, country names, regions.
+    6. **Job Title Keywords:** Look for specific roles like "architect", "director", "VP", "manager", "lead", etc.
+    7. **Topic Requirements:** Identify specific technologies, domains, or subjects that are explicitly requested.
+    8. **Output JSON:** Your output MUST be ONLY a single, valid JSON object with the structure below. Do not add any explanations or any follow-up questions or comments or further analysis.
 
-**Output Format:**
-- You MUST return ONLY a valid JSON object.
+    **JSON Structure:**
+    {
+    "intent": "A concise summary of the user's complete, synthesized goal.",
+    "expertise_keywords": ["List of general subjects for semantic search, consolidated from the conversation."],
+    "mandatory_criteria": {
+        "job_title_contains": ["List of keywords that MUST be in the job title."],
+        "topics_must_include": ["List of topics that the speaker MUST cover."],
+        "centers_must_include": ["List of required locations/centers."]
+    }
+    }"""
 
-**JSON Structure:**
-{
-  "intent": "A concise summary of the user's goal.",
-  "expertise_keywords": ["List of general subjects, skills, or topics requested for semantic search."],
-  "mandatory_criteria": {
-    "job_title_contains": ["List of keywords that MUST be in the job title, e.g., 'architect', 'director', 'VP', 'manager'."],
-    "topics_must_include": ["List of topics that the speaker MUST cover, e.g., 'GPU', 'AI', 'cybersecurity'."],
-    "centers_must_include": ["List of required locations/centers, e.g., 'North America', 'Santa Clara', 'HQ'."]
-  }
-}"""
-
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Query to analyze: {query}"},
-        ]
-
+        # Construct the messages payload, including history if it exists
+        messages = [{"role": "system", "content": system_prompt}]
+        
+        if conversation_history:
+            # Add the conversation history (excluding the current query which will be added separately)
+            for message in conversation_history:
+                messages.append(message)
+        
+        # Add the current user query
+        messages.append({"role": "user", "content": f"Current Query: {current_query}"})
+        
         try:
             response = await nvidia_client.generate_llm_response(
-                messages, max_tokens=300
+                messages
             )
-
+            
             if response.success and response.content:
-                # Try to parse JSON response
                 try:
                     analysis = json.loads(response.content.strip())
                     logger.info(f"LLM analysis successful: {analysis}")
                     return analysis
                 except json.JSONDecodeError:
-                    logger.warning(
-                        f"Failed to parse LLM response as JSON: {response.content}"
-                    )
-                    return self._fallback_analysis(query)
+                    logger.warning(f"Failed to parse LLM response as JSON: {response.content}")
+                    return self._fallback_analysis(current_query)
             else:
                 logger.warning(f"LLM analysis failed: {response.error}")
-                return self._fallback_analysis(query)
-
+                return self._fallback_analysis(current_query)
+                
         except Exception as e:
             logger.error(f"Error in LLM analysis: {e}")
-            return self._fallback_analysis(query)
+            return self._fallback_analysis(current_query)
 
     def _fallback_analysis(self, query: str) -> Dict[str, Any]:
         """Fallback analysis when LLM fails"""
@@ -117,8 +121,8 @@ class QueryProcessor:
             "mandatory_criteria": {
                 "job_title_contains": [],
                 "topics_must_include": [],
-                "centers_must_include": [],
-            },
+                "centers_must_include": []
+            }
         }
 
     async def _generate_query_embedding(self, query: str) -> Optional[List[float]]:
@@ -175,18 +179,19 @@ class QueryProcessor:
 
         return boost_factors
 
-    async def enhance_query_with_llm(self, query: str) -> str:
-        """Use LLM to enhance and expand the query for better speaker search results"""
-
-        system_prompt = """Detailed thinking off. You are a query enhancement specialist for a professional speaker search system. Your task is to expand and enrich user queries to maximize search effectiveness while maintaining the original intent.
+    async def enhance_query_with_llm(self, query: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> str:
+        """Use LLM to enhance and expand the query for better speaker search results considering conversation context"""
+    
+        system_prompt = """Detailed thinking off. You are a query enhancement specialist for a professional speaker search system. Your task is to expand and enrich user queries to maximize search effectiveness while maintaining the original intent, considering the full conversation context.
 
     **Enhancement Strategy:**
     1. **Preserve Original Intent**: Keep the core meaning and requirements intact
-    2. **Add Technical Synonyms**: Include related technical terms, frameworks, and technologies
-    3. **Professional Language**: Use formal language that matches speaker bios and professional profiles
-    4. **Broaden Scope Intelligently**: Add closely related topics that speakers might cover
-    5. **Include Presentation Context**: Add terms related to speaking, presenting, and knowledge sharing
-    6. **MUST ENFORCE**: You must ensure that the mention of specific topics, experiences, roles, titles, locations/centers, are ENFORCED in the enhanced query with the mention that these must be there.
+    2. **Consider Conversation Context**: If there's conversation history, synthesize the current query with previous context
+    3. **Add Technical Synonyms**: Include related technical terms, frameworks, and technologies
+    4. **Professional Language**: Use formal language that matches speaker bios and professional profiles
+    5. **Broaden Scope Intelligently**: Add closely related topics that speakers might cover
+    6. **Include Presentation Context**: Add terms related to speaking, presenting, and knowledge sharing
+    7. **Handle Refinements**: If the current query is a refinement (like "only from Bangalore"), combine it with the original search intent
 
     **Guidelines:**
     - Transform casual language into professional terminology
@@ -194,26 +199,30 @@ class QueryProcessor:
     - Include related technologies and methodologies
     - Mention presentation and communication skills when relevant
     - Focus on terms likely to appear in speaker profiles and bios
-    - Enforce the mention of specific topics, experiences, roles, titles, locations/centers, and ensure they are included in the enhanced query.
-
-    Keep in mind that the purpose of the entire system is to find the best speakers based on user queries. 
-    The enhanced query should be comprehensive yet concise, ensuring it captures all relevant aspects of the user's request.
-    Keep in mind that if there is a mention of a specific topic or speaking topic, do not modify or paraphrase it.
+    - If there's conversation history, create a complete enhanced query that incorporates both the history and current request
+    - Keep the enhanced query comprehensive yet focused
 
     **Example:**
-    Input: "GPU experts with experience delivering briefings on AI topics"
-    Output: "Technical speakers and experts in GPUs, CUDA, high-performance computing, and parallel processing with experience presenting on artificial intelligence, machine learning, deep learning, and neural networks to professional and technical audiences"
+    Input: "GPU experts" (first query)
+    Follow-up: "only from North America" (current query with history)
+    Output: "Technical speakers and experts in GPUs, CUDA, high-performance computing, and parallel processing based in North America with experience presenting on artificial intelligence, machine learning, and deep learning technologies"
 
-    Return only the enhanced query text and nothing else. There is no need to return any explanations or additional information or any follow-up."""
+    Return only the enhanced query text and nothing else. No further explanations or comments."""
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Enhance this speaker search query: <no_think> {query}"}
-        ]
-
+        # Construct messages with conversation context
+        messages = [{"role": "system", "content": system_prompt}]
+        
+        if conversation_history:
+            # Add conversation history for context
+            for message in conversation_history:
+                messages.append(message)
+        
+        # Add the current enhancement request
+        messages.append({"role": "user", "content": f"Enhance this speaker search query considering the full conversation context: {query}"})
+        
         try:
             response = await nvidia_client.generate_llm_response(messages)
-
+            
             if response.success and response.content:
                 enhanced_query = response.content.strip()
                 logger.info(f"Query enhanced from '{query}' to '{enhanced_query}'")
@@ -221,7 +230,7 @@ class QueryProcessor:
             else:
                 logger.warning(f"Failed to enhance query: {response.error}")
                 return query
-
+                
         except Exception as e:
             logger.error(f"Error enhancing query: {e}")
             return query

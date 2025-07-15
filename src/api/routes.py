@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 class SearchQuery(BaseModel):
     query: str
     max_results: int = 10
+    conversation_history: Optional[List[Dict[str, str]]] = None
+    current_speakers: Optional[List[Dict[str, Any]]] = None
 
 
 class SpeakerResult(BaseModel):
@@ -219,6 +221,367 @@ async def initialize_system():
         return False
 
 
+async def _process_refinement_action(
+    query: str,
+    conversation_history: List[Dict[str, str]],
+    current_speakers: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Use LLM to analyze refinement query and determine action type"""
+
+    # Create speaker context
+    speaker_context = "\n".join(
+        [
+            f"Speaker {i+1}: ID={speaker.get('speaker_id', 'unknown')}, Name={speaker.get('name', 'Unknown')}, Title={speaker.get('job_title', '')}, Company={speaker.get('company', '')}, Centers={speaker.get('centers', '')}, Topics={', '.join(speaker.get('speaking_topics', []))}"
+            for i, speaker in enumerate(current_speakers)
+        ]
+    )
+
+    conversation_context = "\n".join(
+        [
+            f"{msg['role'].title()}: {msg['content']}"
+            for msg in conversation_history[-5:]  # Last 5 messages for context
+        ]
+    )
+
+    system_prompt = """Detailed thinking off. You are a conversational refinement processor for a speaker search system. Analyze the user's request and determine what action to take.
+
+**Action Types:**
+1. **ui_modification** - Simple list operations (remove specific speakers, reorder, clear all)
+2. **new_search** - Search refinements that require new database queries (filter by location, add criteria, etc.)
+
+**Instructions:**
+1. Analyze the user's request in context of the conversation and current speaker list
+2. Determine if this is a simple UI modification or requires a new search
+3. For UI modifications: specify exactly which speakers to keep by their speaker_id
+4. For new searches: extract the refined search criteria while preserving original intent
+
+**Output JSON Format:**
+{
+  "action_type": "ui_modification" | "new_search",
+  "reasoning": "Brief explanation of the action",
+  "details": {
+    // For ui_modification:
+    "speakers_to_keep": ["speaker_id1", "speaker_id2"],
+    
+    // For new_search:
+    "refined_criteria": {
+      "intent": "combined intent from conversation",
+      "mandatory_criteria": {
+        "job_title_contains": [],
+        "topics_must_include": [],
+        "centers_must_include": []
+      }
+    },
+    "preserve_relevant_speakers": true
+  }
+}
+
+The response must be valid JSON and contain all required fields. Do not include any additional text or explanations outside the JSON format.
+"""
+
+    user_prompt = f"""**Current Query:** "{query}"
+
+**Conversation History:**
+{conversation_context}
+
+**Current Speakers:**
+{speaker_context}
+
+Analyze the request and determine the appropriate action."""
+
+    try:
+        response = await generate_llm_response(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.1,
+        )
+
+        if response.success and response.content:
+            try:
+                result = json.loads(response.content.strip())
+                # Add original data for context
+                result["original_speakers"] = current_speakers
+                result["original_query"] = query
+                return result
+            except json.JSONDecodeError:
+                logger.warning(
+                    f"Failed to parse refinement response: {response.content}"
+                )
+                return {"action_type": "error", "reasoning": "Could not parse response"}
+        else:
+            return {"action_type": "error", "reasoning": "LLM call failed"}
+
+    except Exception as e:
+        logger.error(f"Error in refinement processing: {e}")
+        return {"action_type": "error", "reasoning": str(e)}
+
+
+async def _generate_recommendation_with_llm(speakers: List[Dict[str, Any]], original_query: str) -> str:
+    """Use LLM to generate a natural recommendation from the current speaker list"""
+    
+    # Create speaker context for LLM
+    speaker_context = "\n".join([
+        f"- **{speaker.get('name', 'Unknown')}** ({speaker.get('job_title', '')}) from {speaker.get('company', '')}: "
+        f"Specializes in {speaker.get('specializations', 'N/A')}. "
+        f"Biography: {speaker.get('bio', 'N/A')}. "
+        f"Target audiences: {speaker.get('audiences', 'N/A')}. "
+        f"Speaking topics: {', '.join(speaker.get('speaking_topics', [])) if speaker.get('speaking_topics') else 'Not specified'}. "
+        f"Centers: {speaker.get('centers', 'N/A')}"
+        for speaker in speakers  # Limit to top 5 for context
+    ])
+
+    system_prompt = """Detailed thinking off. You are a professional recommendation generator for speaker selection. Based on the user's original query and the current list of speakers, provide a natural, personalized recommendation.
+
+**Instructions:**
+1. Analyze the speakers in the context of the original query
+2. Recommend the BEST speaker from the list who most closely matches the original request
+3. Explain briefly (1-2 sentences) why this speaker is the top choice
+4. Be natural and conversational, as if speaking directly to the event organizer
+5. Focus on the speaker's relevant expertise and credentials
+
+**Output Format:**
+Provide only the recommendation text, no additional formatting or labels."""
+
+    user_prompt = f"""**Original Query:** "{original_query}"
+
+**Current Speakers Available:**
+{speaker_context}
+
+Based on the original query and these available speakers, who would you recommend and why?"""
+
+    try:
+        response = await generate_llm_response([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ])
+
+        if response.success and response.content:
+            return response.content.strip()
+        else:
+            # Fallback to simple recommendation
+            return f"**{speakers[0].get('name', 'Unknown')}** - {speakers[0].get('job_title', '')}"
+
+    except Exception as e:
+        logger.error(f"Error generating LLM recommendation: {e}")
+        return f"**{speakers[0].get('name', 'Unknown')}** remains the top choice from the available speakers."
+
+async def _handle_ui_modification(
+    action_result: Dict[str, Any], start_time: datetime
+) -> SearchResponse:
+    """Handle UI modifications like removing speakers with LLM-generated recommendations"""
+
+    details = action_result.get("details", {})
+    speakers_to_keep_ids = set(details.get("speakers_to_keep", []))
+    original_speakers = action_result.get("original_speakers", [])
+
+    # Filter speakers based on LLM decision
+    updated_speakers = [
+        speaker
+        for speaker in original_speakers
+        if str(speaker.get("speaker_id")) in speakers_to_keep_ids
+    ]
+
+    # Generate new recommendation using LLM if we have speakers
+    recommendation = ""
+    explanation = f"Updated the speaker list as requested. {len(updated_speakers)} speakers remaining."
+
+    if updated_speakers:
+        # Use LLM to generate a natural recommendation
+        recommendation = await _generate_recommendation_with_llm(
+            updated_speakers, action_result.get("original_query", "speaker search")
+        )
+    else:
+        recommendation = "No speakers remaining in the list."
+        explanation = "All speakers have been removed from the list."
+
+    search_time = int((datetime.now() - start_time).total_seconds() * 1000)
+
+    return SearchResponse(
+        speakers=updated_speakers,
+        explanation=explanation,
+        recommendation=recommendation,
+        query_analysis={"intent": "list_modification"},
+        total_results=len(updated_speakers),
+        search_time_ms=search_time,
+    )
+
+
+async def _handle_refined_search(
+    action_result: Dict[str, Any], search_query: SearchQuery, start_time: datetime
+) -> SearchResponse:
+    """Handle refined searches that require new database queries with simple speaker ID preservation"""
+
+    details = action_result.get("details", {})
+    refined_criteria = details.get("refined_criteria", {})
+
+    # Extract refined mandatory criteria
+    mandatory_filters = refined_criteria.get("mandatory_criteria", {})
+
+    # Generate new query embedding using the refined intent
+    enhanced_query = refined_criteria.get("intent", search_query.query)
+    query_embedding = await query_processor._generate_query_embedding(enhanced_query)
+
+    if not query_embedding:
+        return ErrorResponse(
+            message="I'm having trouble processing your refined search.",
+            suggestion="Please try rephrasing your request.",
+        )
+
+    # Perform new search with refined criteria
+    search_results = await vector_db.hybrid_search(
+        query_embedding=query_embedding,
+        query_text=enhanced_query,
+        filters=mandatory_filters,
+        limit=search_query.max_results,
+    )
+
+    if not search_results["success"]:
+        return ErrorResponse(
+            message="The refined search encountered an issue.",
+            suggestion="Try a different refinement or start a new search.",
+        )
+
+    candidates = search_results["candidates"]
+
+    # Convert to speaker results
+    speaker_results = []
+    found_speaker_ids = set()
+
+    for candidate in candidates:
+        topics = candidate.get("speaking_topics", "")
+        if isinstance(topics, str):
+            topic_list = [t.strip() for t in topics.split(",") if t.strip()]
+        else:
+            topic_list = topics if isinstance(topics, list) else []
+
+        speaker_id = (
+            candidate.get("speaker_id")
+            or candidate.get("id")
+            or candidate.get("metadata", {}).get("speaker_id")
+            or "unknown"
+        )
+
+        found_speaker_ids.add(str(speaker_id))
+
+        speaker_result = SpeakerResult(
+            speaker_id=str(speaker_id),
+            name=candidate.get(
+                "name", candidate.get("metadata", {}).get("name", "Unknown")
+            ),
+            job_title=candidate.get(
+                "job_title", candidate.get("metadata", {}).get("job_title", "")
+            ),
+            company=candidate.get(
+                "company", candidate.get("metadata", {}).get("company")
+            ),
+            speaking_topics=topic_list,
+            bio=candidate.get("bio", candidate.get("metadata", {}).get("bio", "")),
+            specializations=candidate.get(
+                "specializations",
+                candidate.get("metadata", {}).get("specializations", ""),
+            ),
+            audiences=candidate.get(
+                "audiences", candidate.get("metadata", {}).get("audiences", "")
+            ),
+            centers=candidate.get(
+                "centers", candidate.get("metadata", {}).get("centers", "")
+            ),
+            similarity_score=candidate.get("similarity_score", 0.0),
+            rerank_score=candidate.get("rerank_score"),
+        )
+        speaker_results.append(speaker_result)
+
+    # Simple speaker ID preservation - add existing speakers that aren't already in new results
+    if details.get("preserve_relevant_speakers") and search_query.current_speakers:
+        for existing_speaker in search_query.current_speakers:
+            existing_speaker_id = str(existing_speaker.get("speaker_id", ""))
+
+            # Only preserve if not already in new results
+            if (
+                existing_speaker_id not in found_speaker_ids
+                and existing_speaker_id != "unknown"
+            ):
+                try:
+                    preserved_speaker = SpeakerResult(
+                        speaker_id=existing_speaker_id,
+                        name=existing_speaker.get("name", "Unknown"),
+                        job_title=existing_speaker.get("job_title", ""),
+                        company=existing_speaker.get("company"),
+                        speaking_topics=existing_speaker.get("speaking_topics", []),
+                        bio=existing_speaker.get("bio", ""),
+                        specializations=existing_speaker.get("specializations", ""),
+                        audiences=existing_speaker.get("audiences", ""),
+                        centers=existing_speaker.get("centers", ""),
+                        similarity_score=existing_speaker.get(
+                            "similarity_score", 0.5
+                        ),  # Default score
+                        rerank_score=existing_speaker.get("rerank_score"),
+                    )
+                    speaker_results.append(preserved_speaker)
+                    logger.info(
+                        f"Preserved existing speaker: {existing_speaker.get('name')} (ID: {existing_speaker_id})"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Could not preserve speaker {existing_speaker_id}: {e}"
+                    )
+
+    # Generate explanation and recommendation using LLM
+    if speaker_results:
+        explanation = (
+            f"Found {len(speaker_results)} speakers matching your refined criteria."
+        )
+        recommendation = await _generate_recommendation_with_llm(
+            [speaker.__dict__ for speaker in speaker_results], search_query.query
+        )
+    else:
+        explanation = "No speakers found matching your refined criteria."
+        recommendation = "No speakers available for recommendation."
+
+    search_time = int((datetime.now() - start_time).total_seconds() * 1000)
+
+    return SearchResponse(
+        speakers=speaker_results,
+        explanation=explanation,
+        recommendation=recommendation,
+        query_analysis=refined_criteria,
+        total_results=len(speaker_results),
+        search_time_ms=search_time,
+    )
+
+
+def _speaker_meets_criteria(speaker: Dict[str, Any], criteria: Dict[str, Any]) -> bool:
+    """Check if an existing speaker meets new mandatory criteria"""
+
+    # Check job title criteria
+    if criteria.get("job_title_contains"):
+        job_title = speaker.get("job_title", "").lower()
+        if not any(
+            keyword.lower() in job_title for keyword in criteria["job_title_contains"]
+        ):
+            return False
+
+    # Check topic criteria
+    if criteria.get("topics_must_include"):
+        all_topics = f"{speaker.get('speaking_topics', '')} {speaker.get('specializations', '')}".lower()
+        if not any(
+            topic.lower() in all_topics for topic in criteria["topics_must_include"]
+        ):
+            return False
+
+    # Check center criteria
+    if criteria.get("centers_must_include"):
+        centers = speaker.get("centers", "").lower()
+        if not any(
+            center.lower() in centers for center in criteria["centers_must_include"]
+        ):
+            return False
+
+    return True
+
+
 @router.get("/health")
 async def health_check():
     """Health check endpoint"""
@@ -270,7 +633,8 @@ async def search_speakers(search_query: SearchQuery):
         logger.info(f"🔍 Processing search query: {search_query.query}")
 
         # Phase 1: Process query (like in test)
-        query_params = await query_processor.process_query(search_query.query)
+        query_params = await query_processor.process_query(search_query.query,
+                                                           conversation_history = search_query.conversation_history)
 
         query_analysis = query_params.get("llm_analysis", {})
         query_embedding = query_params.get("query_embedding")
@@ -601,4 +965,48 @@ Please generate the analysis and recommendation based on these results.
         return ErrorResponse(
             message="Something went wrong while processing your speaker search. Please try again.",
             suggestion="Try rephrasing your query or search for a different topic.",
+        )
+
+
+@router.post("/refine")
+async def refine_speakers(search_query: SearchQuery):
+    """Refine existing speaker results based on conversational input"""
+    if not speakers_loaded:
+        return ErrorResponse(
+            message="Our speaker database is currently loading. Please try again in a few moments.",
+            suggestion="Check the system status and try your search again shortly.",
+        )
+
+    start_time = datetime.now()
+
+    try:
+        logger.info(f"🔍 Processing refinement query: {search_query.query}")
+
+        # Use LLM to determine the action type and execute it
+        action_result = await _process_refinement_action(
+            query=search_query.query,
+            conversation_history=search_query.conversation_history or [],
+            current_speakers=search_query.current_speakers or [],
+        )
+
+        if action_result["action_type"] == "ui_modification":
+            # Handle UI modifications (remove, reorder, etc.)
+            return _handle_ui_modification(action_result, start_time)
+
+        elif action_result["action_type"] == "new_search":
+            # Handle new search with refined criteria
+            return await _handle_refined_search(action_result, search_query, start_time)
+
+        else:
+            # Handle errors or unrecognized actions
+            return ErrorResponse(
+                message="I couldn't understand that refinement request.",
+                suggestion="Try being more specific, like 'remove speaker 2' or 'only show speakers from Santa Clara'.",
+            )
+
+    except Exception as e:
+        logger.error(f"❌ Refinement error: {e}")
+        return ErrorResponse(
+            message="Something went wrong while processing your refinement. Please try again.",
+            suggestion="Try rephrasing your request or starting a new search.",
         )
