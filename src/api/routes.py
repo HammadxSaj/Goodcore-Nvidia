@@ -42,6 +42,7 @@ class SpeakerResult(BaseModel):
     bio: Optional[str] = None
     specializations: Optional[str] = None
     audiences: Optional[str] = None
+    centers: Optional[str] = None
     similarity_score: float
     rerank_score: Optional[float] = None
 
@@ -299,6 +300,15 @@ async def search_speakers(search_query: SearchQuery):
             limit=search_query.max_results,
         )
 
+        candidates = search_results["candidates"]
+        logger.info(f"DEBUG - Raw first candidate structure: {candidates[0] if candidates else 'No candidates'}")
+
+        # Check if centers exists in the raw data
+        if candidates:
+            first_candidate = candidates[0]
+            logger.info(f"DEBUG - All keys in first candidate: {list(first_candidate.keys())}")
+            logger.info(f"DEBUG - Metadata keys: {list(first_candidate.get('metadata', {}).keys()) if 'metadata' in first_candidate else 'No metadata'}")
+
         logger.info(
             f"🔍 DEBUG: Hybrid search returned {len(search_results.get('candidates', []))} candidates"
         )
@@ -328,7 +338,7 @@ async def search_speakers(search_query: SearchQuery):
             )
 
             # Add a note for the user in the explanation
-            explanation_prefix = "Your search included specific criteria that returned no exact matches. The results below are the closest semantic matches based on your query. "
+            # explanation_prefix = "Your search included specific criteria that returned no exact matches. The results below are the closest semantic matches based on your query. "
             logger.info(
                 f"🔍 DEBUG: Fallback search returned {len(search_results.get('candidates', []))} candidates"
             )
@@ -360,6 +370,10 @@ async def search_speakers(search_query: SearchQuery):
                 or "unknown"
             )
 
+            centers_value = candidate.get("centers", candidate.get("metadata", {}).get("centers", ""))
+            logger.info(f"DEBUG - Centers value for {candidate.get('name', 'Unknown')}: '{centers_value}'")
+
+
             speaker_result = SpeakerResult(
                 speaker_id=str(speaker_id),
                 name=candidate.get(
@@ -380,6 +394,7 @@ async def search_speakers(search_query: SearchQuery):
                 audiences=candidate.get(
                     "audiences", candidate.get("metadata", {}).get("audiences", "")
                 ),
+                centers=centers_value,
                 similarity_score=candidate.get("similarity_score", 0.0),
                 rerank_score=candidate.get("rerank_score"),
             )
@@ -402,6 +417,15 @@ async def search_speakers(search_query: SearchQuery):
 1. **Review the Query:** Carefully consider the user's original request.
 2. **Analyze the Candidates:** Examine the provided list of up to 10 speaker profiles.
 3. **Select the Best:** Choose a variable number of speakers who are the strongest match. Do not feel obligated to select all of them. Quality is more important than quantity. If only 3 are a great fit, select only 3.
+4. **Must match certain criteria:** Ensure that the selected speakers meet the following:
+    - There must be mention of the specific topic in their profile as mentioned in the query.
+    - They should have relevant expertise or experience in the area.
+    - There center location should match the user's query.
+    - If there is any mention of a specific audience (e.g., executives, technical teams), they should be suitable for that audience.
+    - if there is any mention of specialization, certification, or specific skills, they should have those qualifications.
+    - if there is any mention of a specific role (e.g., technical speaker, executive presenter), they should fit that role.
+    - if there is any mention of a certain experience level or years of experience, they should meet that requirement.
+    **MUST**: The above criteria MUST be met for each speaker you select.
 4. **Provide Justification:** For each speaker you select, provide a brief, one-sentence justification for why they are a good fit.
 5. **Return JSON:** Your output MUST be a single, valid JSON object containing a list named "shortlist". Each item in the list should be an object with "speaker_id" and "justification".
 
@@ -479,6 +503,7 @@ Please analyze these candidates and return the JSON shortlist of the best fits."
 3.  **Make a Top Recommendation:** In the "Top Recommendation" section, now focus on a single individual.
     -   Identify the single best speaker from the list who most closely matches the user's query.
     -   Justify your choice in 1-2 sentences, explaining what makes them stand out from the rest of the group.
+    -   Do not write anything about any field being "missing" or "not specified". Focus on the strengths of the selected speaker.
 4.  **Guardrail:** Base your analysis STRICTLY on the provided speaker information. Do not invent or infer details not present in the context.
 5.  **Tone:** Be concise, professional, and direct.
 

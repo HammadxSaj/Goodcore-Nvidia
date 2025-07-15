@@ -401,7 +401,7 @@ class VectorDatabase:
         and_conditions = []
 
         # Handle text filters (exact match only)
-        for field in ['location', 'company']:
+        for field in ['centers', 'company']:
             if filters.get(field):
                 and_conditions.append({field: {"$eq": filters[field]}})
 
@@ -517,6 +517,13 @@ class VectorDatabase:
             else:
                 text_parts.append(f"Certifications: {certs}")
 
+        if speaker.get('centers'):
+            centers = speaker['centers']
+            if isinstance(centers, list):
+                text_parts.append(f"Centers: {', '.join(centers)}")
+            else:
+                text_parts.append(f"Centers: {centers}")
+
         return " | ".join(text_parts)
 
     def _prepare_metadata(self, speaker: Dict[str, Any]) -> Dict[str, Any]:
@@ -527,7 +534,7 @@ class VectorDatabase:
         # Add simple fields
         for field in ['name', 'job_title', 'company', 'location', 'bio']:
             if speaker.get(field):
-                metadata[field] = str(speaker[field])[:500]  # Limit length
+                metadata[field] = str(speaker[field])
 
         # Add numeric fields
         for field in ['years_experience']:
@@ -535,7 +542,7 @@ class VectorDatabase:
                 metadata[field] = float(speaker[field])
 
         # Convert lists to comma-separated strings
-        for field in ['speaking_topics', 'specializations', 'certifications', 'audiences']:
+        for field in ['speaking_topics', 'specializations', 'certifications', 'audiences', 'centers']:
             if speaker.get(field):
                 if isinstance(speaker[field], list):
                     metadata[field] = ', '.join(str(x) for x in speaker[field])
