@@ -45,12 +45,12 @@ def get_system_stats() -> Dict[str, Any]:
         return {}
 
 
-def search_speakers(query: str, max_results: int = 15) -> Dict[str, Any]:
+def search_speakers(query: str, max_results: int = 10) -> Dict[str, Any]:
     """Search for speakers using the API"""
     try:
         payload = {"query": query, "max_results": max_results}
 
-        response = requests.post(f"{API_BASE_URL}/search", json=payload, timeout=30)
+        response = requests.post(f"{API_BASE_URL}/search", json=payload, timeout=60)
 
         if response.status_code == 200:
             return response.json()

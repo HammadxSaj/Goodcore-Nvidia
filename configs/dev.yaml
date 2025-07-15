@@ -3,7 +3,7 @@ nvidia:
   embedding_model: "snowflake/arctic-embed-l"
   llm_model: "nvidia/llama3.1-nemotron-nano-4b-v1.1"
   reranker_model: "nvidia/nv-rerank-v1"
-  timeout: 30
+  timeout: 60
   max_retries: 3
 
 vectordb:

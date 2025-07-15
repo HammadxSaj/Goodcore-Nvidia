@@ -12,7 +12,7 @@ class NVIDIAConfig:
     llm_model: str = "nvidia/Llama-3.1-Nemotron-Nano-4B-v1.1"
     reranker_model: str = "nvidia/llama-3.2-nemoretriever-500m-rerank-v2"
     api_key: str = ""
-    timeout: int = 30
+    timeout: int = 60
     max_retries: int = 3
 
 @dataclass

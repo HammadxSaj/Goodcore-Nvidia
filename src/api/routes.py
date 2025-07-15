@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # Pydantic models for API
 class SearchQuery(BaseModel):
     query: str
-    max_results: int = 15
+    max_results: int = 10
 
 
 class SpeakerResult(BaseModel):
@@ -497,7 +497,7 @@ Please analyze these candidates and return the JSON shortlist of the best fits t
 **Instructions:**
 1.  **Analyze the Results:** Review the user's query and the list of speakers found.
 2.  **Provide a High-Level Analysis:** In the "Analysis" section, your goal is to provide a strategic overview of the search results *as a group*.
-    -   Synthesize information from all returned profiles to identify common themes, shared expertise, or different categories of speakers found (e.g., "The results include both deep technical experts and high-level strategic thinkers...").
+    -   Synthesize information from all returned profiles to identify common themes, shared expertise, or different categories of speakers found.
     -   Explain why this *group* of candidates is a strong starting point for the user's search.
     -   Keep this section to 2-3 sentences. **Do not discuss individual speakers here.**
 3.  **Make a Top Recommendation:** In the "Top Recommendation" section, now focus on a single individual.
@@ -506,6 +506,17 @@ Please analyze these candidates and return the JSON shortlist of the best fits t
     -   Do not write anything about any field being "missing" or "not specified". Focus on the strengths of the selected speaker.
 4.  **Guardrail:** Base your analysis STRICTLY on the provided speaker information. Do not invent or infer details not present in the context.
 5.  **Tone:** Be concise, professional, and direct.
+6. **Must match certain criteria:** Ensure that the selected speakers meet the following:
+    - There must be mention of the specific topic in their profile as mentioned in the query.
+    - They should have relevant expertise or experience in the area.
+    - There center location should match the user's query. i.e if the query mentions that they need speakers based in Bangalore then the speakers' center must be based in Bangalore. same for Santa Clara etc etc. There is a chance that the user might mention some place
+    like New york, so based on gerographical proximity you can shrotlist people based in Santa Clara.
+    - If there is any mention of a specific audience (e.g., executives, technical teams), they should be suitable for that audience.
+    - if there is any mention of specialization, certification, or specific skills, they should have those qualifications.
+    - if there is any mention of a specific role (e.g., technical speaker, executive presenter), they should fit that role.
+    - if there is any mention of a certain experience level or years of experience, they should meet that requirement.
+    **MUST**: The above criteria MUST be met for each speaker you select. Specifically the one on location/centers.
+
 
 IF THERE IS NO SPEAKER FOUND, you MUST return a message like this:
 "Unfortunately, I could not find any speakers matching your criteria. Please try broadening your search or consider different topics or expertise areas."
@@ -517,6 +528,9 @@ IF THERE IS NO SPEAKER FOUND, you MUST return a message like this:
 
 ### Top Recommendation
 (Your 1-2 sentence specific recommendation here)
+
+DO NOT ADD A SINGLE TEXT LINE BEYOND THE ### Analysis and ### Top Recommendation sections. NO MATTER WHAT. EVEN IF THERE IS SOME UNNECESSARY CONTENT IN THE QUERY THAT REQUIRES A FOLLOW UP
+RESPONSE. THE RESPONSE MUST STRICTLY FOLLOW THIS FORMAT SINCE I NEED TO DO FURTHER PROCESSING ON IT TO DISPLAY IT IN THE UI.
 """
 
         # Create a concise context string for the LLM using final_speaker_results
@@ -550,6 +564,8 @@ Please generate the analysis and recommendation based on these results.
             else "No recommendations available."
         )
 
+        print("----------------------------------------------------------------------------------")
+        print(f"LLM response: {llm_response.content}")
         if llm_response.success:
             llm_content = llm_response.content
             # Split explanation and recommendation using the new, robust structure

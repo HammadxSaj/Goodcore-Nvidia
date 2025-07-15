@@ -34,10 +34,10 @@ def display_speaker_table(speakers: List[Dict[str, Any]]):
         table_data.append(
             {
                 "Rank": i,
-                "Speaker ID": speaker.get("speaker_id", ""),
+                #"Speaker ID": speaker.get("speaker_id", ""),
                 "Name": speaker.get("name", ""),
                 "Job Title": speaker.get("job_title", ""),
-                "Company": speaker.get("company", "N/A"),
+                #"Company": speaker.get("company", "N/A"),
                 "Speaking Topics": topics_str,
                 "Biography": bio,
                 "Specializations": speaker.get("specializations", "N/A"),
@@ -55,10 +55,10 @@ def display_speaker_table(speakers: List[Dict[str, Any]]):
         hide_index=True,
         column_config={
             "Rank": st.column_config.NumberColumn("Rank", width="small"),
-            "Speaker ID": st.column_config.TextColumn("Speaker ID", width="medium"),
+            #"Speaker ID": st.column_config.TextColumn("Speaker ID", width="medium"),
             "Name": st.column_config.TextColumn("Name", width="medium"),
             "Job Title": st.column_config.TextColumn("Job Title", width="large"),
-            "Company": st.column_config.TextColumn("Company", width="medium"),
+            #"Company": st.column_config.TextColumn("Company", width="medium"),
             "Speaking Topics": st.column_config.TextColumn(
                 "Speaking Topics", width="large"
             ),
