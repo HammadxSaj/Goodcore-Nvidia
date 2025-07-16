@@ -207,6 +207,7 @@ class QueryProcessor:
     Follow-up: "only from North America" (current query with history)
     Output: "Technical speakers and experts in GPUs, CUDA, high-performance computing, and parallel processing based in North America with experience presenting on artificial intelligence, machine learning, and deep learning technologies"
 
+    If the case is of a follow up query, there is no need to mention the process of how you are refining the query rather just refine it and return it under 150 words.
     Return only the enhanced query text and nothing else. There is no need to add any additional text or explanation outside of the enhanced query. Even if there is a conversation history, you can use it to provide context, but do not mention it in the output. Just focus on enhancing the speaker search query."""
 
         # Construct messages with conversation context
@@ -218,10 +219,13 @@ class QueryProcessor:
                 messages.append(message)
         
         # Add the current enhancement request
-        messages.append({"role": "user", "content": f"Enhance this speaker search query considering the full conversation context: {query}. Return only the enhanced query text and nothing else. There is no need to add any additional text or explanation outside of the enhanced query. Even if there is a conversation history, you can use it to provide context, but do not mention it in the output. Just focus on enhancing the speaker search query."})
+        messages.append({"role": "user", "content": f"Enhance this speaker search query considering the full conversation context under 150 words: {query}. Return only the enhanced query text and nothing else. There is no need to add any additional text or explanation outside of the enhanced query. Even if there is a conversation history, you can use it to provide context, but do not mention it in the output. Just focus on enhancing the speaker search query."})
         
         try:
-            response = await nvidia_client.generate_llm_response(messages)
+            response = await nvidia_client.generate_llm_response(messages, 
+                max_tokens=150,  # Limit to 150 words
+                temperature=0.7
+            )
             
             if response.success and response.content:
                 enhanced_query = response.content.strip()

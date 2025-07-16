@@ -231,7 +231,7 @@ async def _process_refinement_action(
     # Create speaker context
     speaker_context = "\n".join(
         [
-            f"Speaker {i+1}: ID={speaker.get('speaker_id', 'unknown')}, Name={speaker.get('name', 'Unknown')}, Title={speaker.get('job_title', '')}, Company={speaker.get('company', '')}, Centers={speaker.get('centers', '')}, Topics={', '.join(speaker.get('speaking_topics', []))}"
+            f"Speaker {i+1}: ID={speaker.get('speaker_id', 'unknown')}, Name={speaker.get('name', 'Unknown')}"
             for i, speaker in enumerate(current_speakers)
         ]
     )
@@ -239,56 +239,56 @@ async def _process_refinement_action(
     conversation_context = "\n".join(
         [
             f"{msg['role'].title()}: {msg['content']}"
-            for msg in conversation_history[-5:]  # Last 5 messages for context
+            for msg in conversation_history[-1:]  # Last 5 messages for context
         ]
     )
 
-    system_prompt = """Detailed thinking off. You are a conversational refinement processor for a speaker search system. Analyze the user's request and determine what action to take.
+    system_prompt = """Detailed thinking off. You are a conversational refinement processor for a speaker search system. 
+
+**IMPORTANT: Focus ONLY on the current user query, not previous conversation history.**
 
 **Action Types:**
 1. **ui_modification** - Simple list operations (remove specific speakers, reorder, clear all)
 2. **new_search** - Search refinements that require new database queries (filter by location, add criteria, etc.)
 
 **Instructions:**
-1. Analyze the user's request in context of the conversation and current speaker list
-2. Determine if this is a simple UI modification or requires a new search
-3. For UI modifications: specify exactly which speakers to keep by their speaker_id
-4. For new searches: extract the refined search criteria while preserving original intent
+1. **ONLY analyze the CURRENT user request** - ignore previous requests in conversation history
+2. **Look at the current speaker list** to see who is actually available to remove/modify
+3. For removal requests: identify the speaker by name matching (case-insensitive, partial matching allowed)
+4. For UI modifications: specify exactly which speakers to keep by their speaker_id (after removing the specified speaker), you must ensure that all the speakers specified are actually in the current speaker list and they are not removed. There IDs must be present in the current speakers to keep list.
+5. For new searches: Just return "new_search" with no modifications or details.
 
 **Output JSON Format:**
 {
   "action_type": "ui_modification" | "new_search",
-  "reasoning": "Brief explanation of the action",
+  "reasoning": "Explain the action taken in 1-2 sentences", //For ui_modification only
   "details": {
     // For ui_modification:
-    "speakers_to_keep": ["speaker_id1", "speaker_id2"],
-    
-    // For new_search:
-    "refined_criteria": {
-      "intent": "combined intent from conversation",
-      "mandatory_criteria": {
-        "job_title_contains": [],
-        "topics_must_include": [],
-        "centers_must_include": []
-      }
-    },
+    "speakers_to_keep": ["speaker_id1", "speaker_id2"], // You must ensure that all speaker_ids are actually in the current speaker list. Make sure to write the speaker_id as it is.
+    //Make sure that the speakers to keep is a list of strings, each string is a speaker_id of the speaker to keep, eg. ["speaker_id1", "speaker_id2", .....]
     "preserve_relevant_speakers": true
   }
 }
 
+**CRITICAL**: When processing removal requests, only consider speakers that are actually in the current speaker list. If a speaker name is not found, keep all current speakers and explain in reasoning.
+
 The response must be valid JSON and contain all required fields. Do not include any additional text or explanations outside the JSON format or before it. Just focus on returning the JSON object as specified.
 """
 
-    user_prompt = f"""**Current Query:** "{query}"
+    user_prompt = f"""**CURRENT REQUEST ONLY:** "{query}"
 
-**Conversation History:**
-{conversation_context}
-
-**Current Speakers:**
+**Current Speakers Available to Modify:**
 {speaker_context}
 
-Analyze the request and determine the appropriate action. The response must be valid JSON and contain all required fields. Do not include any additional text or explanations outside the JSON format or before it. Just focus on returning the JSON object as specified.
+**Previous Context (for reference only, do NOT act on these):**
+{conversation_context}
+
+Analyze ONLY the current request "{query}" and determine the appropriate action based on the current speaker list. The response must be valid JSON and contain all required fields. Do not include any additional text or explanations outside the JSON format or before it. Just focus on returning the JSON object as specified.
 """
+    
+    print(f"Processing refinement action for query: {query}")
+    print(f"Conversation history: {conversation_history}")
+    print(f"Current speakers: {current_speakers}")
 
     try:
         response = await generate_llm_response(
@@ -298,6 +298,9 @@ Analyze the request and determine the appropriate action. The response must be v
             ],
             temperature=0.1,
         )
+
+        print("-------------------------Here is the response-------------------------")
+        print(f"LLM response: {response.content.strip()}")
 
         if response.success and response.content:
             try:
@@ -330,7 +333,7 @@ async def _generate_recommendation_with_llm(speakers: List[Dict[str, Any]], orig
         f"Target audiences: {speaker.get('audiences', 'N/A')}. "
         f"Speaking topics: {', '.join(speaker.get('speaking_topics', [])) if speaker.get('speaking_topics') else 'Not specified'}. "
         f"Centers: {speaker.get('centers', 'N/A')}"
-        for speaker in speakers  # Limit to top 5 for context
+        for speaker in speakers 
     ])
 
     system_prompt = """Detailed thinking off. You are a professional recommendation generator for speaker selection. Based on the user's original query and the current list of speakers, provide a natural, personalized recommendation.
@@ -683,7 +686,7 @@ async def search_speakers(search_query: SearchQuery):
         search_results = await vector_db.hybrid_search(
             query_embedding=query_embedding,
             query_text=query_params.get("enhanced_query", search_query.query),
-            filters=mandatory_filters,  # Pass the extracted filters here
+            #filters=mandatory_filters,  # Pass the extracted filters here
             limit=search_query.max_results,
         )
 
@@ -720,7 +723,7 @@ async def search_speakers(search_query: SearchQuery):
             search_results = await vector_db.hybrid_search(
                 query_embedding=query_embedding,
                 query_text=query_params.get("enhanced_query", search_query.query),
-                filters=None,  # No filters this time
+                #filters=None,  # No filters this time
                 limit=search_query.max_results,
             )
 
@@ -833,7 +836,7 @@ YOU MUST ABIDE BY THE FOLLOWING FORMAT, There is no need to add any additional t
 }"""
 
             user_prompt_for_shortlisting = f"""
-**User Query:** "{search_query.query}"
+**User Query:** "{query_params.get('enhanced_query', search_query.query)}"
 
 **Candidate Speakers:**
 {shortlist_context}
@@ -844,7 +847,8 @@ Please analyze these candidates and return the JSON shortlist of the best fits t
                 [
                     {"role": "system", "content": shortlisting_system_prompt},
                     {"role": "user", "content": user_prompt_for_shortlisting},
-                ]
+                ],
+                temperature=0.1,
             )
 
             if shortlisting_response.success:
@@ -892,8 +896,8 @@ Please analyze these candidates and return the JSON shortlist of the best fits t
     -   Justify your choice in 1-2 sentences, explaining what makes them stand out from the rest of the group.
     -   Do not write anything about any field being "missing" or "not specified". Focus on the strengths of the selected speaker.
 4.  **Guardrail:** Base your analysis STRICTLY on the provided speaker information. Do not invent or infer details not present in the context.
-5.  **Tone:** Be concise, professional, and direct.
-6. **Must match certain criteria:** Ensure that the selected speakers meet the following:
+6.  **Tone:** Be concise, professional, and direct.
+**Must match certain criteria:** Ensure that the selected speakers meet the following:
     - There must be mention of the specific topic in their profile as mentioned in the query.
     - They should have relevant expertise or experience in the area.
     - There center location should match the user's query. i.e if the query mentions that they need speakers based in Bangalore then the speakers' center must be based in Bangalore. same for Santa Clara etc etc. There is a chance that the user might mention some place
@@ -904,9 +908,6 @@ Please analyze these candidates and return the JSON shortlist of the best fits t
     - if there is any mention of a certain experience level or years of experience, they should meet that requirement.
     **MUST**: The above criteria MUST be met for each speaker you select. Specifically the one on location/centers.
 
-
-IF THERE IS NO SPEAKER FOUND, you MUST return a message like this:
-"Unfortunately, I could not find any speakers matching your criteria. Please try broadening your search or consider different topics or expertise areas."
 
 **Output Format:**
 - You MUST use the following Markdown structure. Do not add any other text.
@@ -931,7 +932,7 @@ If there is conversation history, you can use it to provide context, but do not 
         )
 
         user_prompt = f"""
-**User Query:** "{search_query.query}"
+**User Query:** "{query_params.get('enhanced_query', search_query.query)}"
 
 **Search Results:**
 {speaker_context}
