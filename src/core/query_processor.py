@@ -32,7 +32,7 @@ class QueryProcessor:
         logger.info(f"Enhanced query: {enhanced_query}")
 
         # STEP 2: Use enhanced query for LLM analysis (with conversation context)
-        #llm_analysis = await self._analyze_query_with_llm(enhanced_query, conversation_history)
+        # llm_analysis = await self._analyze_query_with_llm(enhanced_query, conversation_history)
 
         # STEP 3: Generate query embedding using enhanced query
         query_embedding = await self._generate_query_embedding(enhanced_query)
@@ -48,13 +48,13 @@ class QueryProcessor:
             'timestamp': datetime.now().isoformat()
         }
 
-        #logger.info(f"Query processing complete - Primary intent: {llm_analysis.get('intent', 'unknown')}")
+        # logger.info(f"Query processing complete - Primary intent: {llm_analysis.get('intent', 'unknown')}")
 
         return search_params
 
     async def _analyze_query_with_llm(self, current_query: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
         """Use LLM to analyze the current query in the context of a conversation history."""
-    
+
         system_prompt = """Detailed thinking off. You are a highly intelligent query analysis engine for a speaker search system. Your purpose is to analyze a user's latest query by synthesizing it with the entire preceding conversation history to produce a single, consolidated set of search criteria.
 
     **Core Task:**
@@ -83,20 +83,20 @@ class QueryProcessor:
 
         # Construct the messages payload, including history if it exists
         messages = [{"role": "system", "content": system_prompt}]
-        
+
         if conversation_history:
             # Add the conversation history (excluding the current query which will be added separately)
             for message in conversation_history:
                 messages.append(message)
-        
+
         # Add the current user query
         messages.append({"role": "user", "content": f"Current Query: {current_query}"})
-        
+
         try:
             response = await nvidia_client.generate_llm_response(
                 messages
             )
-            
+
             if response.success and response.content:
                 try:
                     analysis = json.loads(response.content.strip())
@@ -108,7 +108,7 @@ class QueryProcessor:
             else:
                 logger.warning(f"LLM analysis failed: {response.error}")
                 return self._fallback_analysis(current_query)
-                
+
         except Exception as e:
             logger.error(f"Error in LLM analysis: {e}")
             return self._fallback_analysis(current_query)
@@ -181,7 +181,7 @@ class QueryProcessor:
 
     async def enhance_query_with_llm(self, query: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> str:
         """Use LLM to enhance and expand the query for better speaker search results considering conversation context"""
-    
+
         system_prompt = """Detailed thinking off. You are a query enhancement specialist for a professional speaker search system. Your task is to expand and enrich user queries to maximize search effectiveness while maintaining the original intent, considering the full conversation context.
 
     **Enhancement Strategy:**
@@ -203,7 +203,7 @@ class QueryProcessor:
     - Keep the enhanced query comprehensive yet focused
 
     **Example:**
-    Input: "GPU experts" (first query)
+    Input: "GPU experts proficient in AI and ML" (first query)
     Follow-up: "only from North America" (current query with history)
     Output: "Technical speakers and experts in GPUs, CUDA, high-performance computing, and parallel processing based in North America with experience presenting on artificial intelligence, machine learning, and deep learning technologies"
 
@@ -212,21 +212,21 @@ class QueryProcessor:
 
         # Construct messages with conversation context
         messages = [{"role": "system", "content": system_prompt}]
-        
+
         if conversation_history:
             # Add conversation history for context
             for message in conversation_history:
                 messages.append(message)
-        
+
         # Add the current enhancement request
         messages.append({"role": "user", "content": f"Enhance this speaker search query considering the full conversation context under 150 words: {query}. Return only the enhanced query text and nothing else. There is no need to add any additional text or explanation outside of the enhanced query. Even if there is a conversation history, you can use it to provide context, but do not mention it in the output. Just focus on enhancing the speaker search query."})
-        
+
         try:
             response = await nvidia_client.generate_llm_response(messages, 
                 max_tokens=150,  # Limit to 150 words
                 temperature=0.7
             )
-            
+
             if response.success and response.content:
                 enhanced_query = response.content.strip()
                 logger.info(f"Query enhanced from '{query}' to '{enhanced_query}'")
@@ -234,7 +234,7 @@ class QueryProcessor:
             else:
                 logger.warning(f"Failed to enhance query: {response.error}")
                 return query
-                
+
         except Exception as e:
             logger.error(f"Error enhancing query: {e}")
             return query
