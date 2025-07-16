@@ -32,7 +32,7 @@ class QueryProcessor:
         logger.info(f"Enhanced query: {enhanced_query}")
 
         # STEP 2: Use enhanced query for LLM analysis (with conversation context)
-        llm_analysis = await self._analyze_query_with_llm(enhanced_query, conversation_history)
+        #llm_analysis = await self._analyze_query_with_llm(enhanced_query, conversation_history)
 
         # STEP 3: Generate query embedding using enhanced query
         query_embedding = await self._generate_query_embedding(enhanced_query)
@@ -42,13 +42,13 @@ class QueryProcessor:
             'original_query': query,
             'cleaned_query': cleaned_query,
             'enhanced_query': enhanced_query,
-            'llm_analysis': llm_analysis,
+            #'llm_analysis': llm_analysis,
             'query_embedding': query_embedding,
-            'boost_factors': self._create_boost_factors(llm_analysis),
+            #'boost_factors': self._create_boost_factors(llm_analysis),
             'timestamp': datetime.now().isoformat()
         }
 
-        logger.info(f"Query processing complete - Primary intent: {llm_analysis.get('intent', 'unknown')}")
+        #logger.info(f"Query processing complete - Primary intent: {llm_analysis.get('intent', 'unknown')}")
 
         return search_params
 
@@ -207,7 +207,7 @@ class QueryProcessor:
     Follow-up: "only from North America" (current query with history)
     Output: "Technical speakers and experts in GPUs, CUDA, high-performance computing, and parallel processing based in North America with experience presenting on artificial intelligence, machine learning, and deep learning technologies"
 
-    Return only the enhanced query text and nothing else. No further explanations or comments."""
+    Return only the enhanced query text and nothing else. There is no need to add any additional text or explanation outside of the enhanced query. Even if there is a conversation history, you can use it to provide context, but do not mention it in the output. Just focus on enhancing the speaker search query."""
 
         # Construct messages with conversation context
         messages = [{"role": "system", "content": system_prompt}]
@@ -218,7 +218,7 @@ class QueryProcessor:
                 messages.append(message)
         
         # Add the current enhancement request
-        messages.append({"role": "user", "content": f"Enhance this speaker search query considering the full conversation context: {query}"})
+        messages.append({"role": "user", "content": f"Enhance this speaker search query considering the full conversation context: {query}. Return only the enhanced query text and nothing else. There is no need to add any additional text or explanation outside of the enhanced query. Even if there is a conversation history, you can use it to provide context, but do not mention it in the output. Just focus on enhancing the speaker search query."})
         
         try:
             response = await nvidia_client.generate_llm_response(messages)

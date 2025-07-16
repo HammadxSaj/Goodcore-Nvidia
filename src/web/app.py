@@ -173,12 +173,10 @@ def main():
     if prompt := st.chat_input(
         "What are you looking for? Or, refine your last search."
     ):
-        # Add user message to history and display it
+        # Add user message to history immediately
         st.session_state.conversation_history.append(
             {"role": "user", "content": prompt}
         )
-        with st.chat_message("user"):
-            st.markdown(prompt)
 
         # Determine if this is a new search or refinement
         search_type = detect_search_type(
@@ -186,67 +184,67 @@ def main():
         )
 
         # Process the user's prompt
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                api_response = None
+        api_response = None
 
-                if search_type == "new_search" or st.session_state.is_first_search:
-                    # Use regular search API
-                    api_response = call_search_api(
-                        prompt, st.session_state.conversation_history[:-1]
-                    )
-                    st.session_state.is_first_search = False
-                else:
-                    # Use refinement API
-                    current_speakers_dict = convert_speakers_for_api(
-                        st.session_state.displayed_speakers
-                    )
-                    api_response = call_refine_api(
-                        prompt,
-                        st.session_state.conversation_history[:-1],
-                        current_speakers_dict,
+        with st.spinner("Thinking..."):
+            if search_type == "new_search" or st.session_state.is_first_search:
+                # Use regular search API
+                api_response = call_search_api(
+                    prompt, st.session_state.conversation_history[:-1]
+                )
+                st.session_state.is_first_search = False
+            else:
+                # Use refinement API
+                current_speakers_dict = convert_speakers_for_api(
+                    st.session_state.displayed_speakers
+                )
+                api_response = call_refine_api(
+                    prompt,
+                    st.session_state.conversation_history[:-1],
+                    current_speakers_dict,
+                )
+
+        # Process API response and update state
+        if api_response:
+            # Check for a structured error from the backend
+            if api_response.get("error"):
+                response_content = f"❌ {api_response.get('message', 'I can only help with speaker-related queries.')}"
+                if api_response.get("suggestion"):
+                    response_content += (
+                        f"\n\n**Suggestion:** {api_response.get('suggestion')}"
                     )
 
-                if api_response:
-                    # Check for a structured error from the backend
-                    if api_response.get("error"):
-                        response_content = f"❌ {api_response.get('message', 'I can only help with speaker-related queries.')}"
-                        if api_response.get("suggestion"):
-                            response_content += (
-                                f"\n\n**Suggestion:** {api_response.get('suggestion')}"
-                            )
-                        st.markdown(response_content)
-                        st.session_state.conversation_history.append(
-                            {"role": "assistant", "content": response_content}
-                        )
-                    else:
-                        # It's a successful search result
-                        st.session_state.displayed_speakers = api_response.get(
-                            "speakers", []
-                        )
-                        st.session_state.last_query_analysis = api_response.get(
-                            "query_analysis", {}
-                        )
-                        st.session_state.last_explanation = api_response.get(
-                            "explanation", "Here are the speakers I found."
-                        )
-                        st.session_state.last_recommendation = api_response.get(
-                            "recommendation", ""
-                        )
+                # Add AI response to conversation history
+                st.session_state.conversation_history.append(
+                    {"role": "assistant", "content": response_content}
+                )
+            else:
+                # It's a successful search result - update all state
+                st.session_state.displayed_speakers = api_response.get("speakers", [])
+                st.session_state.last_query_analysis = api_response.get(
+                    "query_analysis", {}
+                )
+                st.session_state.last_explanation = api_response.get(
+                    "explanation", "Here are the speakers I found."
+                )
+                st.session_state.last_recommendation = api_response.get(
+                    "recommendation", ""
+                )
 
-                        # Add the AI's explanation to chat history and rerun to display results
-                        ai_message = st.session_state.last_explanation
-                        st.session_state.conversation_history.append(
-                            {"role": "assistant", "content": ai_message}
-                        )
-                        st.rerun()
-                else:
-                    # Handle case where API call fails completely
-                    error_message = "I'm having trouble connecting to my services. The search couldn't be updated. Please try again in a moment."
-                    st.markdown(error_message)
-                    st.session_state.conversation_history.append(
-                        {"role": "assistant", "content": error_message}
-                    )
+                # Add the AI's explanation to chat history
+                ai_message = st.session_state.last_explanation
+                st.session_state.conversation_history.append(
+                    {"role": "assistant", "content": ai_message}
+                )
+        else:
+            # Handle case where API call fails completely
+            error_message = "I'm having trouble connecting to my services. The search couldn't be updated. Please try again in a moment."
+            st.session_state.conversation_history.append(
+                {"role": "assistant", "content": error_message}
+            )
+
+        # Rerun to refresh the display with updated conversation and speakers
+        st.rerun()
 
 
 # --- Entry Point ---

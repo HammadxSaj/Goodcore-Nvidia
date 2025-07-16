@@ -435,19 +435,14 @@ async def _handle_ui_modification(
 async def _handle_refined_search(
     action_result: Dict[str, Any], search_query: SearchQuery, start_time: datetime
 ) -> SearchResponse:
-    """Handle refined searches that require new database queries with simple speaker ID preservation"""
+    """Handle refined searches that require new database queries with enhanced query"""
 
-    details = action_result.get("details", {})
-    # refined_criteria = details.get("refined_criteria", {})
-
-    # Extract refined mandatory criteria
-    # mandatory_filters = refined_criteria.get("mandatory_criteria", {})
-
-    # Generate new query embedding using the refined intent
-    # enhanced_query = refined_criteria.get("intent", search_query.query)
-    enhanced_query = await self.enhance_query_with_llm(
-        cleaned_query, conversation_history
+    # Use enhance_query_with_llm to synthesize conversation context + current refinement
+    enhanced_query = await query_processor.enhance_query_with_llm(
+        query=search_query.query, conversation_history=search_query.conversation_history
     )
+
+    # Generate query embedding using the enhanced query
     query_embedding = await query_processor._generate_query_embedding(enhanced_query)
 
     if not query_embedding:
@@ -456,11 +451,11 @@ async def _handle_refined_search(
             suggestion="Please try rephrasing your request.",
         )
 
-    # Perform new search with refined criteria
+    # Perform new search WITHOUT filters (as you requested)
     search_results = await vector_db.hybrid_search(
         query_embedding=query_embedding,
         query_text=enhanced_query,
-        #filters=mandatory_filters,
+        # filters=None,  # No filters as requested
         limit=search_query.max_results,
     )
 
@@ -521,6 +516,7 @@ async def _handle_refined_search(
         speaker_results.append(speaker_result)
 
     # Simple speaker ID preservation - add existing speakers that aren't already in new results
+    details = action_result.get("details", {})
     if details.get("preserve_relevant_speakers") and search_query.current_speakers:
         for existing_speaker in search_query.current_speakers:
             existing_speaker_id = str(existing_speaker.get("speaker_id", ""))
@@ -555,7 +551,7 @@ async def _handle_refined_search(
                         f"Could not preserve speaker {existing_speaker_id}: {e}"
                     )
 
-    # Generate explanation and recommendation using LLM
+    # Generate explanation and recommendation using LLM (same format as requested)
     if speaker_results:
         explanation = (
             f"Found {len(speaker_results)} speakers matching your refined criteria."
@@ -573,7 +569,7 @@ async def _handle_refined_search(
         speakers=speaker_results,
         explanation=explanation,
         recommendation=recommendation,
-        query_analysis=refined_criteria,
+        query_analysis={"intent": "refined_search", "enhanced_query": enhanced_query},
         total_results=len(speaker_results),
         search_time_ms=search_time,
     )
@@ -820,7 +816,7 @@ async def search_speakers(search_query: SearchQuery):
 4. **Provide Justification:** For each speaker you select, provide a brief, one-sentence justification for why they are a good fit.
 5. **Return JSON:** Your output MUST be a single, valid JSON object containing a list named "shortlist". Each item in the list should be an object with "speaker_id" and "justification".
 
-YOU MUST ABIDE BY THE FOLLOWING FORMAT, There is no need to add any additional text or explanation outside of the JSON object or before it.:
+YOU MUST ABIDE BY THE FOLLOWING FORMAT, There is no need to add any additional text or explanation outside of the JSON object or before it.
 
 **Example Output Format:**
 {
@@ -842,7 +838,7 @@ YOU MUST ABIDE BY THE FOLLOWING FORMAT, There is no need to add any additional t
 **Candidate Speakers:**
 {shortlist_context}
 
-Please analyze these candidates and return the JSON shortlist of the best fits that must match the criterias mentioned."""
+Please analyze these candidates and return the JSON shortlist of the best fits that must match the criterias mentioned.There is no need to add any additional text or explanation outside of the JSON object or before it."""
 
             shortlisting_response = await generate_llm_response(
                 [
@@ -922,6 +918,8 @@ IF THERE IS NO SPEAKER FOUND, you MUST return a message like this:
 
 DO NOT ADD A SINGLE TEXT LINE BEYOND THE ### Analysis and ### Top Recommendation sections. NO MATTER WHAT. EVEN IF THERE IS SOME UNNECESSARY CONTENT IN THE QUERY THAT REQUIRES A FOLLOW UP
 RESPONSE. THE RESPONSE MUST STRICTLY FOLLOW THIS FORMAT SINCE I NEED TO DO FURTHER PROCESSING ON IT TO DISPLAY IT IN THE UI.
+
+If there is conversation history, you can use it to provide context, but do not mention it in the output. Just focus on the speakers and the user's query.
 """
 
         # Create a concise context string for the LLM using final_speaker_results
@@ -939,6 +937,12 @@ RESPONSE. THE RESPONSE MUST STRICTLY FOLLOW THIS FORMAT SINCE I NEED TO DO FURTH
 {speaker_context}
 
 Please generate the analysis and recommendation based on these results.
+
+DO NOT ADD A SINGLE TEXT LINE BEYOND THE ### Analysis and ### Top Recommendation sections. NO MATTER WHAT. EVEN IF THERE IS SOME UNNECESSARY CONTENT IN THE QUERY THAT REQUIRES A FOLLOW UP
+RESPONSE. THE RESPONSE MUST STRICTLY FOLLOW THIS FORMAT SINCE I NEED TO DO FURTHER PROCESSING ON IT TO DISPLAY IT IN THE UI.
+
+If there is conversation history, you can use it to provide context, but do not mention it in the output. Just focus on the speakers and the user's query.
+
 """
 
         llm_response = await generate_llm_response(
