@@ -276,7 +276,7 @@ async def _process_refinement_action(
   }
 }
 
-The response must be valid JSON and contain all required fields. Do not include any additional text or explanations outside the JSON format.
+The response must be valid JSON and contain all required fields. Do not include any additional text or explanations outside the JSON format or before it. Just focus on returning the JSON object as specified.
 """
 
     user_prompt = f"""**Current Query:** "{query}"
@@ -287,7 +287,8 @@ The response must be valid JSON and contain all required fields. Do not include 
 **Current Speakers:**
 {speaker_context}
 
-Analyze the request and determine the appropriate action."""
+Analyze the request and determine the appropriate action. The response must be valid JSON and contain all required fields. Do not include any additional text or explanations outside the JSON format or before it. Just focus on returning the JSON object as specified.
+"""
 
     try:
         response = await generate_llm_response(
@@ -320,7 +321,7 @@ Analyze the request and determine the appropriate action."""
 
 async def _generate_recommendation_with_llm(speakers: List[Dict[str, Any]], original_query: str) -> str:
     """Use LLM to generate a natural recommendation from the current speaker list"""
-    
+
     # Create speaker context for LLM
     speaker_context = "\n".join([
         f"- **{speaker.get('name', 'Unknown')}** ({speaker.get('job_title', '')}) from {speaker.get('company', '')}: "
@@ -348,8 +349,7 @@ Provide only the recommendation text, no additional formatting or labels."""
 
 **Current Speakers Available:**
 {speaker_context}
-
-Based on the original query and these available speakers, who would you recommend and why?"""
+Based on the original query and these available speakers, who would you recommend and why? Just focus on providing the recommendation text without any additional formatting or labels. There is no need to mention that 'based on available speaker' or 'from the current list'. Just provide the recommendation text directly."""
 
     try:
         response = await generate_llm_response([
@@ -367,6 +367,7 @@ Based on the original query and these available speakers, who would you recommen
         logger.error(f"Error generating LLM recommendation: {e}")
         return f"**{speakers[0].get('name', 'Unknown')}** remains the top choice from the available speakers."
 
+
 async def _handle_ui_modification(
     action_result: Dict[str, Any], start_time: datetime
 ) -> SearchResponse:
@@ -377,11 +378,33 @@ async def _handle_ui_modification(
     original_speakers = action_result.get("original_speakers", [])
 
     # Filter speakers based on LLM decision
-    updated_speakers = [
+    filtered_speaker_dicts = [
         speaker
         for speaker in original_speakers
         if str(speaker.get("speaker_id")) in speakers_to_keep_ids
     ]
+
+    # Convert to SpeakerResult objects
+    updated_speakers = []
+    for speaker_dict in filtered_speaker_dicts:
+        try:
+            speaker_result = SpeakerResult(
+                speaker_id=str(speaker_dict.get("speaker_id", "unknown")),
+                name=speaker_dict.get("name", "Unknown"),
+                job_title=speaker_dict.get("job_title", ""),
+                company=speaker_dict.get("company"),
+                speaking_topics=speaker_dict.get("speaking_topics", []),
+                bio=speaker_dict.get("bio", ""),
+                specializations=speaker_dict.get("specializations", ""),
+                audiences=speaker_dict.get("audiences", ""),
+                centers=speaker_dict.get("centers", ""),
+                similarity_score=speaker_dict.get("similarity_score", 0.0),
+                rerank_score=speaker_dict.get("rerank_score"),
+            )
+            updated_speakers.append(speaker_result)
+        except Exception as e:
+            logger.warning(f"Could not convert speaker to SpeakerResult: {e}")
+            continue
 
     # Generate new recommendation using LLM if we have speakers
     recommendation = ""
@@ -390,7 +413,8 @@ async def _handle_ui_modification(
     if updated_speakers:
         # Use LLM to generate a natural recommendation
         recommendation = await _generate_recommendation_with_llm(
-            updated_speakers, action_result.get("original_query", "speaker search")
+            [speaker.__dict__ for speaker in updated_speakers],
+            action_result.get("original_query", "speaker search"),
         )
     else:
         recommendation = "No speakers remaining in the list."
@@ -414,13 +438,16 @@ async def _handle_refined_search(
     """Handle refined searches that require new database queries with simple speaker ID preservation"""
 
     details = action_result.get("details", {})
-    refined_criteria = details.get("refined_criteria", {})
+    # refined_criteria = details.get("refined_criteria", {})
 
     # Extract refined mandatory criteria
-    mandatory_filters = refined_criteria.get("mandatory_criteria", {})
+    # mandatory_filters = refined_criteria.get("mandatory_criteria", {})
 
     # Generate new query embedding using the refined intent
-    enhanced_query = refined_criteria.get("intent", search_query.query)
+    # enhanced_query = refined_criteria.get("intent", search_query.query)
+    enhanced_query = await self.enhance_query_with_llm(
+        cleaned_query, conversation_history
+    )
     query_embedding = await query_processor._generate_query_embedding(enhanced_query)
 
     if not query_embedding:
@@ -433,7 +460,7 @@ async def _handle_refined_search(
     search_results = await vector_db.hybrid_search(
         query_embedding=query_embedding,
         query_text=enhanced_query,
-        filters=mandatory_filters,
+        #filters=mandatory_filters,
         limit=search_query.max_results,
     )
 
@@ -793,7 +820,7 @@ async def search_speakers(search_query: SearchQuery):
 4. **Provide Justification:** For each speaker you select, provide a brief, one-sentence justification for why they are a good fit.
 5. **Return JSON:** Your output MUST be a single, valid JSON object containing a list named "shortlist". Each item in the list should be an object with "speaker_id" and "justification".
 
-YOU MUST ABIDE BY THE FOLLOWING FORMAT:
+YOU MUST ABIDE BY THE FOLLOWING FORMAT, There is no need to add any additional text or explanation outside of the JSON object or before it.:
 
 **Example Output Format:**
 {
@@ -991,7 +1018,7 @@ async def refine_speakers(search_query: SearchQuery):
 
         if action_result["action_type"] == "ui_modification":
             # Handle UI modifications (remove, reorder, etc.)
-            return _handle_ui_modification(action_result, start_time)
+            return await _handle_ui_modification(action_result, start_time)
 
         elif action_result["action_type"] == "new_search":
             # Handle new search with refined criteria
