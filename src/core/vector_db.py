@@ -16,6 +16,8 @@ from pathlib import Path
 
 from .config import config
 from .nvidia_services import nvidia_client
+from core.bm25_service import bm25_service
+from core.fusion import reciprocal_rank_fusion
 
 logger = logging.getLogger(__name__)
 
@@ -190,15 +192,15 @@ class VectorDatabase:
 
         try:
             # Prepare where clause for filtering
-            where_clause = None
-            if filters:
-                where_clause = self._build_where_clause(filters)
+            # where_clause = None
+            # if filters:
+            #     where_clause = self._build_where_clause(filters)
 
             # Perform similarity search
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=limit,
-                where=where_clause,
+                #where=where_clause,
                 include=["embeddings", "documents", "metadatas", "distances"]
             )
 
@@ -244,145 +246,133 @@ class VectorDatabase:
         query_embedding: List[float],
         query_text: str,
         filters: Optional[Dict[str, Any]] = None,
-        vector_weight: float = 0.7,
         limit: int = 20
     ) -> Dict[str, Any]:
-        """Perform hybrid vector + rerank search with post-filtering for mandatory criteria"""
-        
-        try:
-            # Separate mandatory criteria from basic filters
-            mandatory_criteria = {}
-            basic_filters = {}
+        """Perform hybrid search: Vector + BM25 + RRF fusion + Reranking"""
+    
+        try:           
+            logger.info(f"Starting hybrid search for: '{query_text}'")
             
-            if filters:
-                mandatory_criteria = {
-                    "job_title_contains": filters.get("job_title_contains", []),
-                    "topics_must_include": filters.get("topics_must_include", []),
-                    "centers_must_include": filters.get("centers_must_include", [])
-                }
-                
-                # Keep only basic filters that ChromaDB supports
-                for key, value in filters.items():
-                    if key not in ["job_title_contains", "topics_must_include", "centers_must_include"]:
-                        basic_filters[key] = value
-
-            # Build ChromaDB-compatible where clause (only basic filters)
-            #where_clause = self._build_basic_where_clause(basic_filters)
+            # Step 1: Vector Search
+            logger.info("🔍 Performing vector search...")
+            vector_results = []
             
-            #logger.info(f"Vector search with basic filters: {where_clause}")
-            logger.info(f"Post-filtering with mandatory criteria: {mandatory_criteria}")
-
-            # Step 1: Vector search with basic filters only
             collection = self.client.get_collection(name=self.collection_name)
-            
-            # Get more results to account for post-filtering
-            search_limit = limit * 3  # Get 3x more results for post-filtering
-            
-            results = collection.query(
+            vector_search_results = collection.query(
                 query_embeddings=[query_embedding],
-                #where=where_clause,
-                n_results=search_limit,
+                n_results=limit * 2,  # Get more results for better fusion
                 include=["documents", "metadatas", "distances"]
             )
-
-            if not results['documents'] or not results['documents'][0]:
-                logger.info("No documents found in vector search")
+            
+            if vector_search_results['documents'] and vector_search_results['documents'][0]:
+                documents = vector_search_results['documents'][0]
+                metadatas = vector_search_results['metadatas'][0] if vector_search_results['metadatas'] else [{}] * len(documents)
+                distances = vector_search_results['distances'][0] if vector_search_results['distances'] else [0.0] * len(documents)
+                ids = vector_search_results['ids'][0] if vector_search_results['ids'] else [str(i) for i in range(len(documents))]
+                
+                for i, doc in enumerate(documents):
+                    metadata = metadatas[i] if i < len(metadatas) else {}
+                    distance = distances[i] if i < len(distances) else 0.0
+                    doc_id = ids[i] if i < len(ids) else str(i)
+                    
+                    # Convert distance to similarity
+                    similarity = 1.0 - distance
+                    
+                    result = {
+                        'speaker_id': doc_id,
+                        'id': doc_id,
+                        'document': doc,
+                        'metadata': metadata,
+                        'similarity_score': similarity,
+                        **metadata  # Flatten metadata
+                    }
+                    vector_results.append(result)
+            
+            logger.info(f"Vector search found {len(vector_results)} results")
+            
+            # Step 2: BM25 Search
+            logger.info("🔍 Performing BM25 search...")
+            bm25_results = bm25_service.search(query_text, limit=limit * 2)
+            logger.info(f"BM25 search found {len(bm25_results)} results")
+            
+            # Step 3: Fusion (if we have both results)
+            if vector_results and bm25_results:
+                logger.info("🔄 Performing RRF fusion...")
+                fused_results = reciprocal_rank_fusion(
+                    vector_results=vector_results,
+                    bm25_results=bm25_results,
+                    vector_weight=0.6,  # Favor vector search slightly
+                    bm25_weight=0.4
+                )
+                candidates = fused_results[:limit * 2]  # Get more for reranking
+                logger.info(f"Fusion produced {len(candidates)} candidates")
+                
+            elif vector_results:
+                logger.info("📊 Using vector-only results (no BM25 matches)")
+                candidates = vector_results[:limit * 2]
+                
+            elif bm25_results:
+                logger.info("📊 Using BM25-only results (no vector matches)")
+                # Convert BM25 results to standard format
+                candidates = []
+                for idx, score, speaker_data in bm25_results[:limit * 2]:
+                    candidate = speaker_data.copy()
+                    candidate.update({
+                        'bm25_score': score,
+                        'similarity_score': min(score / 10.0, 1.0),  # Normalize BM25 score
+                        'search_type': 'bm25_only'
+                    })
+                    candidates.append(candidate)
+                    
+            else:
+                logger.info("❌ No results from either search method")
                 return {
                     "success": True,
                     "candidates": [],
                     "total_found": 0,
                     "search_type": "no_results"
                 }
-
-            # Convert to candidates with similarity scores
-            documents = results['documents'][0]
-            metadatas = results['metadatas'][0] if results['metadatas'] else [{}] * len(documents)
-            distances = results['distances'][0] if results['distances'] else [0.0] * len(documents)
-            ids = results['ids'][0] if results['ids'] else [str(i) for i in range(len(documents))]
-
-            candidates = []
-            for i, doc in enumerate(documents):
-                metadata = metadatas[i] if i < len(metadatas) else {}
-                distance = distances[i] if i < len(distances) else 0.0
-                doc_id = ids[i] if i < len(ids) else str(i)
-                
-                # Convert distance to similarity (assuming cosine distance)
-                similarity = 1.0 - distance
-                
-                candidate = {
-                    'id': doc_id,
-                    'document': doc,
-                    'metadata': metadata,
-                    'similarity_score': similarity,
-                    **metadata  # Flatten metadata into candidate
-                }
-                candidates.append(candidate)
-
-            logger.info(f"Vector search found {len(candidates)} candidates before post-filtering")
-
-            # Step 2: Apply mandatory criteria post-filtering
-            if any(mandatory_criteria.get(key) for key in mandatory_criteria.keys()):
-                candidates = self._apply_mandatory_filters(candidates, mandatory_criteria)
-                logger.info(f"After mandatory filtering: {len(candidates)} candidates remain")
-
-            # Step 3: Rerank the filtered candidates
+            
+            # Step 4: Reranking
             if candidates:
+                logger.info(f"🎯 Reranking {len(candidates)} candidates...")
                 try:
                     rerank_response = await nvidia_client.rerank_results(
                         query=query_text,
                         candidates=candidates,
                         top_k=limit
                     )
-
+                    
                     if rerank_response.success:
-                        # Combine vector similarity and rerank scores
-                        for candidate in rerank_response.rankings:
-                            vector_score = candidate.get('similarity_score', 0.0)
-                            rerank_score = candidate.get('rerank_score', 0.0)
-
-                            # Weighted combination
-                            candidate['hybrid_score'] = (
-                                vector_weight * vector_score + 
-                                (1 - vector_weight) * rerank_score
-                            )
-
-                        # Sort by hybrid score
-                        rerank_response.rankings.sort(
-                            key=lambda x: x.get('hybrid_score', 0.0), 
-                            reverse=True
-                        )
-
+                        logger.info(f"✅ Reranking successful, returning {len(rerank_response.rankings)} results")
                         return {
                             "success": True,
-                            "candidates": rerank_response.rankings[:limit],
+                            "candidates": rerank_response.rankings,
                             "total_found": len(rerank_response.rankings),
-                            "search_type": "hybrid_with_mandatory_filtering"
+                            "search_type": "hybrid_vector_bm25_reranked"
                         }
                     else:
-                        logger.warning(f"Reranking failed, using filtered vector results: {rerank_response.error}")
-                        return {
-                            "success": True,
-                            "candidates": candidates[:limit],
-                            "total_found": len(candidates),
-                            "search_type": "vector_with_mandatory_filtering"
-                        }
-
+                        logger.warning(f"Reranking failed: {rerank_response.error}")
+                        
                 except Exception as e:
                     logger.error(f"Error in reranking: {e}")
-                    return {
-                        "success": True,
-                        "candidates": candidates[:limit],
-                        "total_found": len(candidates),
-                        "search_type": "vector_with_mandatory_filtering"
-                    }
-
+                
+                # Fallback: return fused results without reranking
+                logger.info("📋 Returning fused results without reranking")
+                return {
+                    "success": True,
+                    "candidates": candidates[:limit],
+                    "total_found": len(candidates),
+                    "search_type": "hybrid_vector_bm25_no_rerank"
+                }
+            
             return {
                 "success": True,
                 "candidates": [],
                 "total_found": 0,
-                "search_type": "no_results_after_filtering"
+                "search_type": "no_candidates"
             }
-
+            
         except Exception as e:
             logger.error(f"Error in hybrid search: {e}")
             return {

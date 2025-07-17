@@ -23,6 +23,7 @@ from core.data_processor import SpeakerDataProcessor  # Correct class name
 from core.vector_db import VectorDatabase
 from core.query_processor import QueryProcessor
 from core.nvidia_services import generate_llm_response
+from core.bm25_service import bm25_service
 
 logger = logging.getLogger(__name__)
 
@@ -182,6 +183,14 @@ async def initialize_system():
         # Create speaker profiles
         speaker_profiles = data_processor.create_speaker_profiles()
         logger.info(f"Created {len(speaker_profiles)} speaker profiles")
+
+        # Phase 2.5: Initialize BM25 index (NEW)
+        logger.info("🔍 Creating BM25 index...")
+        bm25_success = bm25_service.create_index(speaker_profiles)
+        if not bm25_success:
+            logger.warning("BM25 index creation failed, continuing without BM25")
+        else:
+            logger.info("✅ BM25 index created successfully")
 
         # Phase 3: Initialize vector database
         vector_db_ready = await vector_db.initialize_collection()
@@ -554,13 +563,15 @@ async def _handle_refined_search(
                         f"Could not preserve speaker {existing_speaker_id}: {e}"
                     )
 
+    top_15_speakers = speaker_results[:15]
+
     # Generate explanation and recommendation using LLM (same format as requested)
-    if speaker_results:
+    if top_15_speakers:
         explanation = (
-            f"Found {len(speaker_results)} speakers matching your refined criteria."
+            f"Found {len(top_15_speakers)} speakers matching your refined criteria."
         )
         recommendation = await _generate_recommendation_with_llm(
-            [speaker.__dict__ for speaker in speaker_results], search_query.query
+            [speaker.__dict__ for speaker in top_15_speakers], search_query.query
         )
     else:
         explanation = "No speakers found matching your refined criteria."
@@ -628,11 +639,15 @@ async def get_system_stats():
     db_stats = await vector_db.get_collection_stats()
     data_stats = data_processor.get_data_statistics()
 
+    # Add BM25 stats
+    bm25_stats = bm25_service.get_index_stats()
+
     return {
         "total_speakers": db_stats.get("total_speakers", 0),
         "collection_name": db_stats.get("collection_name", "unknown"),
         "database_path": db_stats.get("db_path", "unknown"),
         "data_statistics": data_stats,
+        "bm25_statistics": bm25_stats,
     }
 
 
@@ -666,8 +681,8 @@ async def search_speakers(search_query: SearchQuery):
         query_embedding = query_params.get("query_embedding")
 
         # Extract the mandatory filters from the analysis
-        mandatory_filters = query_analysis.get("mandatory_criteria", {})
-        logger.info(f"Extracted mandatory filters: {mandatory_filters}")
+        # mandatory_filters = query_analysis.get("mandatory_criteria", {})
+        # logger.info(f"Extracted mandatory filters: {mandatory_filters}")
 
         if not query_embedding:
             return ErrorResponse(
@@ -675,9 +690,9 @@ async def search_speakers(search_query: SearchQuery):
                 suggestion="Be specific about the topic, industry, or expertise you're looking for.",
             )
 
-        logger.info(
-            f"Query processed - Intent: {query_analysis.get('intent', 'unknown')}"
-        )
+        # logger.info(
+        #     f"Query processed - Intent: {query_analysis.get('intent', 'unknown')}"
+        # )
 
         # Phase 2: Perform hybrid search with mandatory filters
         logger.info(
@@ -704,34 +719,34 @@ async def search_speakers(search_query: SearchQuery):
         )
 
         # Check if we need to implement fallback logic
-        search_had_filters = (
-            any(mandatory_filters.get(key) for key in mandatory_filters.keys())
-            if mandatory_filters
-            else False
-        )
+        # search_had_filters = (
+        #     any(mandatory_filters.get(key) for key in mandatory_filters.keys())
+        #     if mandatory_filters
+        #     else False
+        # )
         search_was_successful = search_results["success"]
         results_found = len(search_results.get("candidates", [])) > 0
 
         explanation_prefix = ""
 
-        if search_was_successful and not results_found and search_had_filters:
-            logger.warning(
-                f"Strict search for '{search_query.query}' yielded no results. Retrying with semantic search only."
-            )
+        # if search_was_successful and not results_found and search_had_filters:
+        #     logger.warning(
+        #         f"Strict search for '{search_query.query}' yielded no results. Retrying with semantic search only."
+        #     )
 
-            # Re-run the search WITHOUT filters
-            search_results = await vector_db.hybrid_search(
-                query_embedding=query_embedding,
-                query_text=query_params.get("enhanced_query", search_query.query),
-                #filters=None,  # No filters this time
-                limit=search_query.max_results,
-            )
+        #     # Re-run the search WITHOUT filters
+        #     search_results = await vector_db.hybrid_search(
+        #         query_embedding=query_embedding,
+        #         query_text=query_params.get("enhanced_query", search_query.query),
+        #         #filters=None,  # No filters this time
+        #         limit=search_query.max_results,
+        #     )
 
-            # Add a note for the user in the explanation
-            # explanation_prefix = "Your search included specific criteria that returned no exact matches. The results below are the closest semantic matches based on your query. "
-            logger.info(
-                f"🔍 DEBUG: Fallback search returned {len(search_results.get('candidates', []))} candidates"
-            )
+        #     # Add a note for the user in the explanation
+        #     # explanation_prefix = "Your search included specific criteria that returned no exact matches. The results below are the closest semantic matches based on your query. "
+        #     logger.info(
+        #         f"🔍 DEBUG: Fallback search returned {len(search_results.get('candidates', []))} candidates"
+        #     )
 
         if not search_results["success"]:
             return ErrorResponse(
@@ -789,14 +804,16 @@ async def search_speakers(search_query: SearchQuery):
             )
             speaker_results.append(speaker_result)
 
+        top_15_speakers = speaker_results[:15]  # Take only top 15 for LLM shortlisting
+
         # NEW PHASE: LLM Shortlisting
         final_speaker_results = []
-        if speaker_results:
+        if top_15_speakers:
             # Create a concise context of the candidates for the LLM
             shortlist_context = "\n".join(
                 [
                     f"ID: {s.speaker_id}, Name: {s.name}, Title: {s.job_title}, Company: {s.company or 'N/A'}, Bio: {(s.bio + '...') if s.bio else s.bio or 'N/A'}, Topics: {', '.join(s.speaking_topics) if s.speaking_topics else 'N/A'}, Specializations: {s.specializations or 'N/A'}, Audiences: {s.audiences or 'N/A'}, Centers: {s.centers or 'N/A'}"
-                    for s in speaker_results
+                    for s in top_15_speakers
                 ]
             )
 
@@ -816,9 +833,8 @@ async def search_speakers(search_query: SearchQuery):
     - if there is any mention of a specific role (e.g., technical speaker, executive presenter), they should fit that role.
     - if there is any mention of a certain experience level or years of experience, they should meet that requirement.
     **MUST**: The above criteria MUST be met for each speaker you select. Specifically the one on location/centers.
-4. **Provide Justification:** For each speaker you select, provide a brief, one-sentence justification for why they are a good fit.
 5. **Return JSON:** Your output MUST be a single, valid JSON object containing a list named "shortlist". Each item in the list should be an object with "speaker_id" and "justification".
-
+6. The criteria for location/centers is very important, so make sure to check that the speakers' center matches the user's query. If the query mentions a specific location like "Bangalore", then the speakers' center must be based in Bangalore or a nearby area. 
 YOU MUST ABIDE BY THE FOLLOWING FORMAT, There is no need to add any additional text or explanation outside of the JSON object or before it.
 
 **Example Output Format:**
@@ -826,11 +842,9 @@ YOU MUST ABIDE BY THE FOLLOWING FORMAT, There is no need to add any additional t
   "shortlist": [
     {
       "speaker_id": "12345",
-      "justification": "This speaker's deep experience in cloud security along with their talks on AI in cybersecurity and being based in Santa Clara make them a perfect fit for the user's request."
     },
     {
-      "speaker_id": "67890",
-      "justification": "Offers a high-level, strategic perspective on the topic, which is perfect for a business audience or c-suite executives. They also have extensive experience in digital transformation and have spoken on multiple topics on cloud computing."
+      "speaker_id": "67890"
     }
   ]
 }"""
@@ -861,23 +875,23 @@ Please analyze these candidates and return the JSON shortlist of the best fits t
 
                     # Filter the original list to keep only the selected speakers
                     final_speaker_results = [
-                        s for s in speaker_results if s.speaker_id in selected_ids
+                        s for s in top_15_speakers if s.speaker_id in selected_ids
                     ]
 
                     logger.info(
-                        f"LLM shortlisted {len(final_speaker_results)} speakers from the initial {len(speaker_results)}."
+                        f"LLM shortlisted {len(final_speaker_results)} speakers from the initial {len(top_15_speakers)}."
                     )
 
                 except json.JSONDecodeError:
                     logger.warning(
                         "Failed to parse LLM shortlist response. Falling back to original list."
                     )
-                    final_speaker_results = speaker_results[:5]  # Fallback to top 5
+                    final_speaker_results = top_15_speakers[:5]  # Fallback to top 5
             else:
                 logger.warning(
                     "LLM shortlisting call failed. Falling back to original list."
                 )
-                final_speaker_results = speaker_results[:5]  # Fallback to top 5
+                final_speaker_results = top_15_speakers[:5]  # Fallback to top 5
         else:
             final_speaker_results = []
 
@@ -907,6 +921,8 @@ Please analyze these candidates and return the JSON shortlist of the best fits t
     - if there is any mention of a specific role (e.g., technical speaker, executive presenter), they should fit that role.
     - if there is any mention of a certain experience level or years of experience, they should meet that requirement.
     **MUST**: The above criteria MUST be met for each speaker you select. Specifically the one on location/centers.
+
+7. The criteria for location/centers is very important, so make sure to check that the speakers' center matches the user's query. If the query mentions a specific location like "Bangalore", then the speakers' center must be based in Bangalore or a nearby area. If no speaker matches the location criteria, you can still provide a recommendation based on the best available speaker, but make sure to mention that in your recommendation that no speaker matched the location criteria and that the recommendation is based on the best available speaker.
 
 
 **Output Format:**
@@ -1027,8 +1043,7 @@ async def refine_speakers(search_query: SearchQuery):
 
         elif action_result["action_type"] == "new_search":
             # Handle new search with refined criteria
-            return await _handle_refined_search(action_result, search_query, start_time)
-
+            return await search_speakers(search_query)
         else:
             # Handle errors or unrecognized actions
             return ErrorResponse(
