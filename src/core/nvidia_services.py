@@ -284,26 +284,55 @@ class NVIDIAServicesClient:
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
     ) -> LLMResponse:
-        """Generate LLM response using NVIDIA LLM model"""
+        """Generate LLM response using NVIDIA LLM model or Ollama model"""
+
+        # Check if we should use Ollama
+        if config.nvidia.use_ollama_for_llm:
+            endpoint = f"{config.nvidia.ollama_base_url}/api/chat"
+            logger.info(f"Routing LLM request to Ollama: {endpoint}")
+        else:
+            endpoint = f"{self.llm_url}/v1/chat/completions"
+            logger.info(f"Routing LLM request to NVIDIA NIM: {endpoint}")
 
         # Wait for rate limit
         await self.rate_limiter.wait_if_needed()
 
-        payload = {
-            "model": self.llm_model,
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "stream": False
-        }
+        # Prepare payload based on the service
+        if config.nvidia.use_ollama_for_llm:
+            # Ollama API format
+            payload = {
+                "model": "qwen3:32b",
+                "messages": messages,
+                "stream": False,
+                "options": {
+                    "temperature": temperature if temperature is not None else 0.7,
+                }
+            }
 
-        logger.info(f"Generating LLM response with {len(messages)} messages")
+            #print(f"🔍 DEBUG: Ollama LLM Payload: {json.dumps(payload, indent=2)}")
+            # Note: Ollama doesn't use max_tokens in the same way as OpenAI
+            if max_tokens is not None:
+                payload["options"]["num_predict"] = max_tokens
+        else:
+            # NVIDIA NIM API format
+            payload = {
+                "model": self.llm_model,
+                "messages": messages,
+                "stream": False
+            }
+            # Only add parameters if they're provided
+            if max_tokens is not None:
+                payload["max_tokens"] = max_tokens
+            if temperature is not None:
+                payload["temperature"] = temperature
+
+        logger.info(f"Generating LLM response with {len(messages)} messages using model: {payload['model']}")
 
         for attempt in range(self.max_retries):
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.post(
-                        f"{self.llm_url}/v1/chat/completions",
+                        endpoint,
                         json=payload,
                         headers=self.headers,
                         timeout=aiohttp.ClientTimeout(total=self.timeout)
@@ -312,12 +341,27 @@ class NVIDIAServicesClient:
                         if response.status == 200:
                             result = await response.json()
 
-                            content = result['choices'][0]['message']['content']
+                            # Handle different response structures
+                            if config.nvidia.use_ollama_for_llm:
+                                # Ollama's response structure
+                                content = result.get("message", {}).get("content", "")
+                                usage = {
+                                    "prompt_tokens": result.get("prompt_eval_count", 0),
+                                    "completion_tokens": result.get("eval_count", 0),
+                                    "total_tokens": result.get("prompt_eval_count", 0) + result.get("eval_count", 0)
+                                }
+                            else:
+                                # NVIDIA's response structure
+                                content = result['choices'][0]['message']['content']
+                                usage = result.get('usage', {})
+
+                            #make sure to remove <think> </think> tags
+                            content = content.replace("<think>", "").replace("</think>", "").strip()
 
                             return LLMResponse(
                                 content=content,
-                                usage=result.get('usage', {}),
-                                model=self.llm_model,
+                                usage=usage,
+                                model=payload['model'],
                                 success=True
                             )
                         else:
@@ -328,7 +372,7 @@ class NVIDIAServicesClient:
                                 return LLMResponse(
                                     content="",
                                     usage={},
-                                    model=self.llm_model,
+                                    model=payload['model'],
                                     success=False,
                                     error=f"HTTP {response.status}: {error_text}"
                                 )
@@ -341,7 +385,7 @@ class NVIDIAServicesClient:
                     return LLMResponse(
                         content="",
                         usage={},
-                        model=self.llm_model,
+                        model=payload['model'],
                         success=False,
                         error=str(e)
                     )
@@ -350,7 +394,7 @@ class NVIDIAServicesClient:
         return LLMResponse(
             content="",
             usage={},
-            model=self.llm_model,
+            model=payload['model'],
             success=False,
             error="Max retries exceeded"
         )

@@ -182,8 +182,11 @@ class QueryProcessor:
     async def enhance_query_with_llm(self, query: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> str:
         """Use LLM to enhance and expand the query for better speaker search results considering conversation context"""
 
-        system_prompt = """Detailed thinking off. You are a query enhancement specialist for a professional speaker search system. Your task is to expand and enrich user queries to maximize search effectiveness while maintaining the original intent, considering the full conversation context.
+        system_prompt = """Detailed thinking off. You are a query enhancement specialist for a professional speaker search system. Your task is to expand and enrich user queries to maximize search effectiveness by clarifying and professionalizing the user's specific request. You must strictly maintain the original intent and avoid introducing unrelated concepts.
 
+    **Core Task:**
+    Your primary role is to refine, not to reinvent. Enhance the user's keywords with professional language and direct synonyms, but do not add new topics, products, or specializations that the user did not mention.
+    
     **Enhancement Strategy:**
     1. **Preserve Original Intent**: Keep the core meaning and requirements intact
     2. **Consider Conversation Context**: If there's conversation history, synthesize the current query with previous context
@@ -200,12 +203,19 @@ class QueryProcessor:
     - Mention presentation and communication skills when relevant
     - Focus on terms likely to appear in speaker profiles and bios
     - If there's conversation history, create a complete enhanced query that incorporates both the history and current request
+    - If the new query is a refinement, and has no relation to the previous queries in the conversation history, there is no need to consider the conversation history, just enhance the query based on the current query since this implies that it is a new search.
     - Keep the enhanced query comprehensive yet focused
+    - Make sure that if there is a mention of a location, specialization, topic, work experience, job title, or any other criteria, it is included in the enhanced query.
 
     **Example:**
     Input: "GPU experts proficient in AI and ML" (first query)
     Follow-up: "only from North America" (current query with history)
-    Output: "Technical speakers and experts in GPUs, CUDA, high-performance computing, and parallel processing based in North America with experience presenting on artificial intelligence, machine learning, and deep learning technologies"
+    Output: "Technical speakers, engineers, and researchers with expertise in Graphics Processing Units (GPUs) and their application in accelerating Artificial Intelligence (AI), Machine Learning (ML), and Deep Learning workloads. Seeking presenters proficient in GPU-centric frameworks like CUDA, ROCm, and parallel computing paradigms based in North America."
+
+    
+    Input: "Find speakers with expertise in cloud computing and AI" (first query)
+    Follow-up: "Healthcare experts based in Bangalore with experience of telemedicine" (current query with history but this follow up query has no relation to the previous queries in the conversation history)
+    Output: "Healthcare speakers and experts in telemedicine and digital health based in Bangalore with experience of presenting healthcare technologies."
 
     If the case is of a follow up query, there is no need to mention the process of how you are refining the query rather just refine it and return it under 150 words.
     Return only the enhanced query text and nothing else. There is no need to add any additional text or explanation outside of the enhanced query. Even if there is a conversation history, you can use it to provide context, but do not mention it in the output. Just focus on enhancing the speaker search query."""

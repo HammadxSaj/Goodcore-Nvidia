@@ -367,7 +367,7 @@ Based on the original query and these available speakers, who would you recommen
         response = await generate_llm_response([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
-        ])
+        ], temperature=0.7)
 
         if response.success and response.content:
             return response.content.strip()
@@ -835,6 +835,8 @@ async def search_speakers(search_query: SearchQuery):
     **MUST**: The above criteria MUST be met for each speaker you select. Specifically the one on location/centers.
 5. **Return JSON:** Your output MUST be a single, valid JSON object containing a list named "shortlist". Each item in the list should be an object with "speaker_id" and "justification".
 6. The criteria for location/centers is very important, so make sure to check that the speakers' center matches the user's query. If the query mentions a specific location like "Bangalore", then the speakers' center must be based in Bangalore or a nearby area. 
+7. Even if the profile is a perfect match, if the center/location does not match the user's query, you must not include that speaker in the shortlist. If no speaker matches the location criteria, you can still provide a recommendation based on the best available speaker, but make sure to mention that in your recommendation that no speaker matched the location criteria and that the recommendation is based on the best available speaker.
+8. There can be an exception in case of center/location in the case when the job title specifically says that the person is maybe the "Head of Healthcare - EMEA" or "Head of Healthcare - APAC" etc. In that case you can shortlist the speaker even if the center/location does not match the user's query, but make sure to mention that in your recommendation that the speaker is based in a different location but is a great fit for the role.
 YOU MUST ABIDE BY THE FOLLOWING FORMAT, There is no need to add any additional text or explanation outside of the JSON object or before it.
 
 **Example Output Format:**
@@ -923,7 +925,8 @@ Please analyze these candidates and return the JSON shortlist of the best fits t
     **MUST**: The above criteria MUST be met for each speaker you select. Specifically the one on location/centers.
 
 7. The criteria for location/centers is very important, so make sure to check that the speakers' center matches the user's query. If the query mentions a specific location like "Bangalore", then the speakers' center must be based in Bangalore or a nearby area. If no speaker matches the location criteria, you can still provide a recommendation based on the best available speaker, but make sure to mention that in your recommendation that no speaker matched the location criteria and that the recommendation is based on the best available speaker.
-
+7. Even if the profile is a perfect match, if the center/location does not match the user's query, you must not include that speaker in the shortlist. If no speaker matches the location criteria, you can still provide a recommendation based on the best available speaker, but make sure to mention that in your recommendation that no speaker matched the location criteria and that the recommendation is based on the best available speaker.
+8. There can be an exception in case of center/location in the case when the job title specifically says that the person is maybe the "Head of Healthcare - EMEA" or "Head of Healthcare - APAC" etc. In that case you can shortlist the speaker even if the center/location does not match the user's query, but make sure to mention that in your recommendation that the speaker is based in a different location but is a great fit for the role.
 
 **Output Format:**
 - You MUST use the following Markdown structure. Do not add any other text.
@@ -966,7 +969,8 @@ If there is conversation history, you can use it to provide context, but do not 
             [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
-            ]
+            ],
+            temperature=0.7,
         )
 
         explanation = f"Found {len(final_speaker_results)} speakers matching your criteria for '{query_params.get('enhanced_query', search_query.query)}'."

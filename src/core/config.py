@@ -7,13 +7,16 @@ from pathlib import Path
 @dataclass
 class NVIDIAConfig:
     """NVIDIA services configuration"""
-    base_url: str = "http://localhost:8000"
+    # base_url: str = "http://localhost:8000"
+    base_url: str = "http://localhost:11434"  # Updated to Ollama URL
     embedding_model: str = "snowflake/arctic-embed-l"
-    llm_model: str = "nvidia/Llama-3.1-Nemotron-Nano-4B-v1.1"
+    llm_model: str = "qwen3:32b"  # Updated to use Qwen3 model
     reranker_model: str = "nvidia/llama-3.2-nemoretriever-500m-rerank-v2"
     api_key: str = ""
-    timeout: int = 60
+    timeout: int = 240
     max_retries: int = 3
+    ollama_base_url: str = "http://localhost:11434"
+    use_ollama_for_llm: bool = True
 
 @dataclass
 class VectorDBConfig:
