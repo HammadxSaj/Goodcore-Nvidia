@@ -55,7 +55,7 @@ class QueryProcessor:
     async def _analyze_query_with_llm(self, current_query: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
         """Use LLM to analyze the current query in the context of a conversation history."""
 
-        system_prompt = """Detailed thinking off. You are a highly intelligent query analysis engine for a speaker search system. Your purpose is to analyze a user's latest query by synthesizing it with the entire preceding conversation history to produce a single, consolidated set of search criteria.
+        system_prompt = """/no_think Detailed thinking off. You are a highly intelligent query analysis engine for a speaker search system. Your purpose is to analyze a user's latest query by synthesizing it with the entire preceding conversation history to produce a single, consolidated set of search criteria.
 
     **Core Task:**
     Based on the full `conversation_history` and the `current_query`, determine the user's complete and final intent. A follow-up query like "only the ones from Bangalore" MUST be combined with the previous context (e.g., "find me GPU experts") to form a new, complete search for "GPU experts from Bangalore".
@@ -90,7 +90,9 @@ class QueryProcessor:
                 messages.append(message)
 
         # Add the current user query
-        messages.append({"role": "user", "content": f"Current Query: {current_query}"})
+        messages.append(
+            {"role": "user", "content": f"/no_think Current Query: {current_query}"}
+        )
 
         try:
             response = await nvidia_client.generate_llm_response(
@@ -182,11 +184,11 @@ class QueryProcessor:
     async def enhance_query_with_llm(self, query: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> str:
         """Use LLM to enhance and expand the query for better speaker search results considering conversation context"""
 
-        system_prompt = """Detailed thinking off. You are a query enhancement specialist for a professional speaker search system. Your task is to expand and enrich user queries to maximize search effectiveness by clarifying and professionalizing the user's specific request. You must strictly maintain the original intent and avoid introducing unrelated concepts.
+        system_prompt = """/no_think Detailed thinking off. You are a query enhancement specialist for a professional speaker search system. Your task is to expand and enrich user queries to maximize search effectiveness by clarifying and professionalizing the user's specific request. You must strictly maintain the original intent and avoid introducing unrelated concepts.
 
     **Core Task:**
     Your primary role is to refine, not to reinvent. Enhance the user's keywords with professional language and direct synonyms, but do not add new topics, products, or specializations that the user did not mention.
-    
+
     **Enhancement Strategy:**
     1. **Preserve Original Intent**: Keep the core meaning and requirements intact
     2. **Consider Conversation Context**: If there's conversation history, synthesize the current query with previous context
@@ -205,17 +207,19 @@ class QueryProcessor:
     - If there's conversation history, create a complete enhanced query that incorporates both the history and current request
     - If the new query is a refinement, and has no relation to the previous queries in the conversation history, there is no need to consider the conversation history, just enhance the query based on the current query since this implies that it is a new search.
     - Keep the enhanced query comprehensive yet focused
-    - Make sure that if there is a mention of a location, specialization, topic, work experience, job title, or any other criteria, it is included in the enhanced query.
+    - Make sure that if there is a mention of a location, specialization, topic, work experience, job title, or any other criteria, it is included in the enhanced query and is emphasized as a MUST requirement.
 
     **Example:**
     Input: "GPU experts proficient in AI and ML" (first query)
     Follow-up: "only from North America" (current query with history)
-    Output: "Technical speakers, engineers, and researchers with expertise in Graphics Processing Units (GPUs) and their application in accelerating Artificial Intelligence (AI), Machine Learning (ML), and Deep Learning workloads. Seeking presenters proficient in GPU-centric frameworks like CUDA, ROCm, and parallel computing paradigms based in North America."
+    Output: "Technical speakers, engineers, and researchers with expertise in Graphics Processing Units (GPUs) and their application in accelerating Artificial Intelligence (AI), Machine Learning (ML), and Deep Learning workloads. Seeking presenters proficient in GPU-centric frameworks like CUDA, ROCm, and parallel computing paradigms MUST be based in North America."
 
     
     Input: "Find speakers with expertise in cloud computing and AI" (first query)
     Follow-up: "Healthcare experts based in Bangalore with experience of telemedicine" (current query with history but this follow up query has no relation to the previous queries in the conversation history)
-    Output: "Healthcare speakers and experts in telemedicine and digital health based in Bangalore with experience of presenting healthcare technologies."
+    Output: "Healthcare speakers and experts in telemedicine and digital health MUST be based in Bangalore with experience of presenting healthcare technologies."
+
+    Above queries are examples of how to enhance the query. Do not use them as a template for your output.
 
     If the case is of a follow up query, there is no need to mention the process of how you are refining the query rather just refine it and return it under 150 words.
     Return only the enhanced query text and nothing else. There is no need to add any additional text or explanation outside of the enhanced query. Even if there is a conversation history, you can use it to provide context, but do not mention it in the output. Just focus on enhancing the speaker search query."""
@@ -229,7 +233,12 @@ class QueryProcessor:
                 messages.append(message)
 
         # Add the current enhancement request
-        messages.append({"role": "user", "content": f"Enhance this speaker search query considering the full conversation context under 150 words: {query}. Return only the enhanced query text and nothing else. There is no need to add any additional text or explanation outside of the enhanced query. Even if there is a conversation history, you can use it to provide context, but do not mention it in the output. Just focus on enhancing the speaker search query."})
+        messages.append(
+            {
+                "role": "user",
+                "content": f"/no_think Enhance this speaker search query considering the full conversation context under 150 words: {query}. Return only the enhanced query text and nothing else. There is no need to add any additional text or explanation outside of the enhanced query. Even if there is a conversation history, you can use it to provide context, but do not mention it in the output. Just focus on enhancing the speaker search query.",
+            }
+        )
 
         try:
             response = await nvidia_client.generate_llm_response(messages, 

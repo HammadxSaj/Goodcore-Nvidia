@@ -13,7 +13,7 @@ class NVIDIAConfig:
     llm_model: str = "qwen3:32b"  # Updated to use Qwen3 model
     reranker_model: str = "nvidia/llama-3.2-nemoretriever-500m-rerank-v2"
     api_key: str = ""
-    timeout: int = 240
+    timeout: int = 1000
     max_retries: int = 3
     ollama_base_url: str = "http://localhost:11434"
     use_ollama_for_llm: bool = True

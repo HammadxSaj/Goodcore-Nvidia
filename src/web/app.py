@@ -46,7 +46,7 @@ def call_search_api(
     """Call the backend search API for initial searches."""
     try:
         payload = {"query": query, "max_results": 15, "conversation_history": history}
-        response = requests.post(f"{API_BASE_URL}/search", json=payload, timeout=240)
+        response = requests.post(f"{API_BASE_URL}/search", json=payload, timeout=1000)
         if response.status_code == 200:
             return response.json()
         else:
@@ -68,7 +68,7 @@ def call_refine_api(
             "conversation_history": history,
             "current_speakers": current_speakers,
         }
-        response = requests.post(f"{API_BASE_URL}/refine", json=payload, timeout=240)
+        response = requests.post(f"{API_BASE_URL}/refine", json=payload, timeout=1000)
         if response.status_code == 200:
             return response.json()
         else:

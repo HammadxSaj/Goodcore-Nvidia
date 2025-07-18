@@ -260,7 +260,7 @@ class VectorDatabase:
             collection = self.client.get_collection(name=self.collection_name)
             vector_search_results = collection.query(
                 query_embeddings=[query_embedding],
-                n_results=limit * 2,  # Get more results for better fusion
+                n_results=limit,  # Get more results for better fusion
                 include=["documents", "metadatas", "distances"]
             )
             
@@ -292,7 +292,7 @@ class VectorDatabase:
             
             # Step 2: BM25 Search
             logger.info("🔍 Performing BM25 search...")
-            bm25_results = bm25_service.search(query_text, limit=limit * 2)
+            bm25_results = bm25_service.search(query_text, limit=limit)
             logger.info(f"BM25 search found {len(bm25_results)} results")
             
             # Step 3: Fusion (if we have both results)
@@ -301,21 +301,21 @@ class VectorDatabase:
                 fused_results = reciprocal_rank_fusion(
                     vector_results=vector_results,
                     bm25_results=bm25_results,
-                    vector_weight=0.6,  # Favor vector search slightly
-                    bm25_weight=0.4
+                    vector_weight=0.5,  
+                    bm25_weight=0.5
                 )
-                candidates = fused_results[:limit * 2]  # Get more for reranking
+                candidates = fused_results[:limit]  # Get more for reranking
                 logger.info(f"Fusion produced {len(candidates)} candidates")
                 
             elif vector_results:
                 logger.info("📊 Using vector-only results (no BM25 matches)")
-                candidates = vector_results[:limit * 2]
+                candidates = vector_results[:limit]
                 
             elif bm25_results:
                 logger.info("📊 Using BM25-only results (no vector matches)")
                 # Convert BM25 results to standard format
                 candidates = []
-                for idx, score, speaker_data in bm25_results[:limit * 2]:
+                for idx, score, speaker_data in bm25_results[:limit]:
                     candidate = speaker_data.copy()
                     candidate.update({
                         'bm25_score': score,

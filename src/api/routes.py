@@ -79,7 +79,7 @@ async def _is_query_relevant(query: str) -> tuple[bool, str]:
     Uses an LLM to check if a query is a relevant request for finding a speaker.
     Returns (is_relevant, error_message) tuple.
     """
-    system_prompt = """detailed thinking off. You are a security and relevance guard for a speaker search system. 
+    system_prompt = """/no_think detailed thinking off. You are a security and relevance guard for a speaker search system. 
 
 Your ONLY job is to classify user queries and provide context. Respond with JSON containing:
 1. "classification" - either "valid_speaker_request" or "irrelevant_request"
@@ -101,7 +101,7 @@ Format: {"classification": "valid_speaker_request"} OR {"classification": "irrel
 
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f'Classify this query: "{query}"'},
+        {"role": "user", "content": f'/no_think Classify this query: "{query}"'},
     ]
 
     try:
@@ -252,7 +252,7 @@ async def _process_refinement_action(
         ]
     )
 
-    system_prompt = """Detailed thinking off. You are a conversational refinement processor for a speaker search system. 
+    system_prompt = """ /no_think Detailed thinking off. You are a conversational refinement processor for a speaker search system. 
 
 **IMPORTANT: Focus ONLY on the current user query, not previous conversation history.**
 
@@ -284,7 +284,7 @@ async def _process_refinement_action(
 The response must be valid JSON and contain all required fields. Do not include any additional text or explanations outside the JSON format or before it. Just focus on returning the JSON object as specified.
 """
 
-    user_prompt = f"""**CURRENT REQUEST ONLY:** "{query}"
+    user_prompt = f"""/no_think **CURRENT REQUEST ONLY:** "{query}"
 
 **Current Speakers Available to Modify:**
 {speaker_context}
@@ -345,7 +345,7 @@ async def _generate_recommendation_with_llm(speakers: List[Dict[str, Any]], orig
         for speaker in speakers 
     ])
 
-    system_prompt = """Detailed thinking off. You are a professional recommendation generator for speaker selection. Based on the user's original query and the current list of speakers, provide a natural, personalized recommendation.
+    system_prompt = """ /no_think Detailed thinking off. You are a professional recommendation generator for speaker selection. Based on the user's original query and the current list of speakers, provide a natural, personalized recommendation.
 
 **Instructions:**
 1. Analyze the speakers in the context of the original query
@@ -357,7 +357,7 @@ async def _generate_recommendation_with_llm(speakers: List[Dict[str, Any]], orig
 **Output Format:**
 Provide only the recommendation text, no additional formatting or labels."""
 
-    user_prompt = f"""**Original Query:** "{original_query}"
+    user_prompt = f"""/no_think **Original Query:** "{original_query}"
 
 **Current Speakers Available:**
 {speaker_context}
@@ -379,6 +379,15 @@ Based on the original query and these available speakers, who would you recommen
         logger.error(f"Error generating LLM recommendation: {e}")
         return f"**{speakers[0].get('name', 'Unknown')}** remains the top choice from the available speakers."
 
+# Add this helper function after the imports and before the router definition:
+
+
+def _convert_list_to_string(value) -> str:
+    """Convert a list to a comma-separated string, or return the string as-is"""
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value if item)
+    return str(value) if value else ""
+
 
 async def _handle_ui_modification(
     action_result: Dict[str, Any], start_time: datetime
@@ -386,15 +395,19 @@ async def _handle_ui_modification(
     """Handle UI modifications like removing speakers with LLM-generated recommendations"""
 
     details = action_result.get("details", {})
-    speakers_to_keep_ids = set(details.get("speakers_to_keep", []))
+    speakers_to_keep_ids = details.get("speakers_to_keep", [])
     original_speakers = action_result.get("original_speakers", [])
 
-    # Filter speakers based on LLM decision
-    filtered_speaker_dicts = [
-        speaker
-        for speaker in original_speakers
-        if str(speaker.get("speaker_id")) in speakers_to_keep_ids
-    ]
+    # Create a mapping of speaker_id to speaker for quick lookup
+    speaker_map = {
+        str(speaker.get("speaker_id")): speaker for speaker in original_speakers
+    }
+
+    # Filter and reorder speakers based on LLM decision - PRESERVE ORDER
+    filtered_speaker_dicts = []
+    for speaker_id in speakers_to_keep_ids:  # Iterate in the order specified by LLM
+        if speaker_id in speaker_map:
+            filtered_speaker_dicts.append(speaker_map[speaker_id])
 
     # Convert to SpeakerResult objects
     updated_speakers = []
@@ -795,8 +808,10 @@ async def search_speakers(search_query: SearchQuery):
                     "specializations",
                     candidate.get("metadata", {}).get("specializations", ""),
                 ),
-                audiences=candidate.get(
-                    "audiences", candidate.get("metadata", {}).get("audiences", "")
+                audiences=_convert_list_to_string(
+                    candidate.get(
+                        "audiences", candidate.get("metadata", {}).get("audiences", "")
+                    )
                 ),
                 centers=centers_value,
                 similarity_score=candidate.get("similarity_score", 0.0),
@@ -804,7 +819,7 @@ async def search_speakers(search_query: SearchQuery):
             )
             speaker_results.append(speaker_result)
 
-        top_15_speakers = speaker_results[:15]  # Take only top 15 for LLM shortlisting
+        top_15_speakers = speaker_results  # Take only top 15 for LLM shortlisting
 
         # NEW PHASE: LLM Shortlisting
         final_speaker_results = []
@@ -817,12 +832,22 @@ async def search_speakers(search_query: SearchQuery):
                 ]
             )
 
-            shortlisting_system_prompt = """Detailed thinking off. You are an expert talent scout and event organizer's assistant. Your task is to review a list of potential speakers and shortlist the absolute best candidates based on the user's original query.
+            previous_speakers_context = ""
+            if search_query.current_speakers:
+                previous_speakers_context = "\n".join(
+                    [
+                        f"ID: {s.get('speaker_id', 'unknown')}, Name: {s.get('name', 'Unknown')}, Title: {s.get('job_title', '')}, Company: {s.get('company', '') or 'N/A'}, Bio: {(s.get('bio', '') + '...') if s.get('bio') else 'N/A'}, Topics: {', '.join(s.get('speaking_topics', [])) if s.get('speaking_topics') else 'N/A'}, Specializations: {s.get('specializations', '') or 'N/A'}, Audiences: {s.get('audiences', '') or 'N/A'}, Centers: {s.get('centers', '') or 'N/A'}"
+                        for s in search_query.current_speakers
+                    ]
+                )
+
+            shortlisting_system_prompt = """/no_think Detailed thinking off. You are an expert talent scout and event organizer's assistant. Your task is to review a list of potential speakers and shortlist the absolute best candidates based on the user's original query.
 
 **Instructions:**
 1. **Review the Query:** Carefully consider the user's original request.
-2. **Analyze the Candidates:** Examine the provided list of up to 15 speaker profiles.
-3. **Select the Best:** Choose a variable number of speakers who are the strongest match. Do not feel obligated to select all of them. Quality is more important than quantity. If only 3 are a great fit, select only 3. If only 1 is a great fit, select only 1.
+2. **Analyze the Candidates:** Examine the provided list of speaker profiles.
+3. **Select the Best:** Choose a variable number of speakers who are the strongest match. Do not feel obligated to select all of them. Quality is more important than quantity. If only 6 are a great fit, select only 6. If only 1 is a great fit, select only 1. If all 15 are a great fit, select all 15.
+4. **Consider Previous Speakers:** You can also consider speakers from previous searches if they match the new criteria. But if the the past speakers are totally different, you can ignore the previous speakers.
 4. **Must match certain criteria:** Ensure that the selected speakers meet the following:
     - There must be mention of the specific topic in their profile as mentioned in the query.
     - They should have relevant expertise or experience in the area.
@@ -851,13 +876,23 @@ YOU MUST ABIDE BY THE FOLLOWING FORMAT, There is no need to add any additional t
   ]
 }"""
 
-            user_prompt_for_shortlisting = f"""
-**User Query:** "{query_params.get('enhanced_query', search_query.query)}"
+            user_prompt_parts = [
+                f'/no_think **User Query:** "{query_params.get("enhanced_query", search_query.query)}"'
+            ]
 
-**Candidate Speakers:**
-{shortlist_context}
+            user_prompt_parts.append(f"**NEW Search Results:**\n{shortlist_context}")
 
-Please analyze these candidates and return the JSON shortlist of the best fits that must match the criterias mentioned.There is no need to add any additional text or explanation outside of the JSON object or before it."""
+            if previous_speakers_context:
+                user_prompt_parts.append(f"**PREVIOUS Speakers (from earlier searches):**\n{previous_speakers_context}")
+            else:
+                user_prompt_parts.append("**PREVIOUS Speakers:** None")
+
+            user_prompt_parts.append("Please analyze these candidates and return the JSON shortlist of the best fits that must match the criterias mentioned. Consider speakers from BOTH new and previous results since the previous candidates may also match the new requirement. There is no need to add any additional text or explanation outside of the JSON object or before it.")
+
+            user_prompt_for_shortlisting = "\n\n".join(user_prompt_parts)
+
+            print(f"Shortlisting candidates with prompt: {user_prompt_for_shortlisting}")
+            print(f"Shortlisting system prompt: {shortlisting_system_prompt}")
 
             shortlisting_response = await generate_llm_response(
                 [
@@ -899,7 +934,7 @@ Please analyze these candidates and return the JSON shortlist of the best fits t
 
         # Phase 4: Generate explanation and recommendation using LLM (like in test)
         # Use final_speaker_results instead of speaker_results from this point forward
-        system_prompt = """Detailed thinking off. You are an AI Assistant for Speaker Selection. Your goal is to provide a concise, professional, and helpful summary for event organizers.
+        system_prompt = """/no_think Detailed thinking off. You are an AI Assistant for Speaker Selection. Your goal is to provide a concise, professional, and helpful summary for event organizers.
 
 **Instructions:**
 1.  **Analyze the Results:** Review the user's query and the list of speakers found.
@@ -913,20 +948,6 @@ Please analyze these candidates and return the JSON shortlist of the best fits t
     -   Do not write anything about any field being "missing" or "not specified". Focus on the strengths of the selected speaker.
 4.  **Guardrail:** Base your analysis STRICTLY on the provided speaker information. Do not invent or infer details not present in the context.
 6.  **Tone:** Be concise, professional, and direct.
-**Must match certain criteria:** Ensure that the selected speakers meet the following:
-    - There must be mention of the specific topic in their profile as mentioned in the query.
-    - They should have relevant expertise or experience in the area.
-    - There center location should match the user's query. i.e if the query mentions that they need speakers based in Bangalore then the speakers' center must be based in Bangalore. same for Santa Clara etc etc. There is a chance that the user might mention some place
-    like New york, so based on gerographical proximity you can shrotlist people based in Santa Clara.
-    - If there is any mention of a specific audience (e.g., executives, technical teams), they should be suitable for that audience.
-    - if there is any mention of specialization, certification, or specific skills, they should have those qualifications.
-    - if there is any mention of a specific role (e.g., technical speaker, executive presenter), they should fit that role.
-    - if there is any mention of a certain experience level or years of experience, they should meet that requirement.
-    **MUST**: The above criteria MUST be met for each speaker you select. Specifically the one on location/centers.
-
-7. The criteria for location/centers is very important, so make sure to check that the speakers' center matches the user's query. If the query mentions a specific location like "Bangalore", then the speakers' center must be based in Bangalore or a nearby area. If no speaker matches the location criteria, you can still provide a recommendation based on the best available speaker, but make sure to mention that in your recommendation that no speaker matched the location criteria and that the recommendation is based on the best available speaker.
-7. Even if the profile is a perfect match, if the center/location does not match the user's query, you must not include that speaker in the shortlist. If no speaker matches the location criteria, you can still provide a recommendation based on the best available speaker, but make sure to mention that in your recommendation that no speaker matched the location criteria and that the recommendation is based on the best available speaker.
-8. There can be an exception in case of center/location in the case when the job title specifically says that the person is maybe the "Head of Healthcare - EMEA" or "Head of Healthcare - APAC" etc. In that case you can shortlist the speaker even if the center/location does not match the user's query, but make sure to mention that in your recommendation that the speaker is based in a different location but is a great fit for the role.
 
 **Output Format:**
 - You MUST use the following Markdown structure. Do not add any other text.
@@ -950,7 +971,7 @@ If there is conversation history, you can use it to provide context, but do not 
             ]
         )
 
-        user_prompt = f"""
+        user_prompt = f""" /no_think
 **User Query:** "{query_params.get('enhanced_query', search_query.query)}"
 
 **Search Results:**

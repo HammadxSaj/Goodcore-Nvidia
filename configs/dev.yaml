@@ -5,7 +5,7 @@ nvidia:
   # llm_model: "nvidia/llama3.1-nemotron-nano-4b-v1.1"
   llm_model: "qwen3:32b"
   reranker_model: "nvidia/nv-rerank-v1"
-  timeout: 240
+  timeout: 1000
   max_retries: 3
   ollama_base_url: "http://localhost:11434"  # Default Ollama URL
   use_ollama_for_llm: true  # Set to true to use Ollama
