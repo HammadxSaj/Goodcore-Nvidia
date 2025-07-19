@@ -678,7 +678,7 @@ async def search_speakers(search_query: SearchQuery):
     if not is_relevant:
         return ErrorResponse(
             message=error_message,
-            suggestion="Try asking about speakers for specific topics like 'AI experts', 'marketing professionals', or 'healthcare speakers'.",
+            suggestion="Try asking about speakers for specific topics like 'Healthcare experts that have knowledge of NVIDIA Clara and can speak on the topic of AI and LLMs'",
         )
 
     start_time = datetime.now()
@@ -789,7 +789,7 @@ async def search_speakers(search_query: SearchQuery):
             )
 
             centers_value = candidate.get("centers", candidate.get("metadata", {}).get("centers", ""))
-            logger.info(f"DEBUG - Centers value for {candidate.get('name', 'Unknown')}: '{centers_value}'")
+            # logger.info(f"DEBUG - Centers value for {candidate.get('name', 'Unknown')}: '{centers_value}'")
 
             speaker_result = SpeakerResult(
                 speaker_id=str(speaker_id),
@@ -819,7 +819,7 @@ async def search_speakers(search_query: SearchQuery):
             )
             speaker_results.append(speaker_result)
 
-        top_15_speakers = speaker_results  # Take only top 15 for LLM shortlisting
+        top_15_speakers = speaker_results[:10]  # Take only top 10 for LLM shortlisting
 
         # NEW PHASE: LLM Shortlisting
         final_speaker_results = []
@@ -874,7 +874,10 @@ YOU MUST ABIDE BY THE FOLLOWING FORMAT, There is no need to add any additional t
       "speaker_id": "67890"
     }
   ]
-}"""
+}
+
+You MUST return a single JSON object with a list named "shortlist". Each item in the list should be an object with "speaker_id" having a string value.
+"""
 
             user_prompt_parts = [
                 f'/no_think **User Query:** "{query_params.get("enhanced_query", search_query.query)}"'
@@ -883,16 +886,21 @@ YOU MUST ABIDE BY THE FOLLOWING FORMAT, There is no need to add any additional t
             user_prompt_parts.append(f"**NEW Search Results:**\n{shortlist_context}")
 
             if previous_speakers_context:
-                user_prompt_parts.append(f"**PREVIOUS Speakers (from earlier searches):**\n{previous_speakers_context}")
+                # user_prompt_parts.append(f"**PREVIOUS Speakers (from earlier searches):**\n{previous_speakers_context}")
+                user_prompt_parts.append(
+                    "**PREVIOUS Speakers (from earlier searches):**None"
+                )
             else:
                 user_prompt_parts.append("**PREVIOUS Speakers:** None")
 
-            user_prompt_parts.append("Please analyze these candidates and return the JSON shortlist of the best fits that must match the criterias mentioned. Consider speakers from BOTH new and previous results since the previous candidates may also match the new requirement. There is no need to add any additional text or explanation outside of the JSON object or before it.")
+            user_prompt_parts.append(
+                "Please analyze these candidates and return the JSON shortlist of the best fits that must match the criterias mentioned. Consider speakers from BOTH new and previous results since the previous candidates may also match the new requirement. There is no need to add any additional text or explanation outside of the JSON object or before it. YOU MUST ABIDE BY THE FOLLOWING FORMAT, that is a single JSON object with a list named 'shortlist'. Each item in the list should be an object with 'speaker_id' having a string value"
+            )
 
             user_prompt_for_shortlisting = "\n\n".join(user_prompt_parts)
 
-            print(f"Shortlisting candidates with prompt: {user_prompt_for_shortlisting}")
-            print(f"Shortlisting system prompt: {shortlisting_system_prompt}")
+            # print(f"Shortlisting candidates with prompt: {user_prompt_for_shortlisting}")
+            # print(f"Shortlisting system prompt: {shortlisting_system_prompt}")
 
             shortlisting_response = await generate_llm_response(
                 [
