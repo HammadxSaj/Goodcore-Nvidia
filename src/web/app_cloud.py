@@ -10,7 +10,7 @@ from typing import Dict, Any, List, Optional
 import os
 
 # Import your existing components
-from components.speaker_table import display_speaker_table
+from .components.speaker_table import display_speaker_table
 from core.config_cloud import cloud_config
 
 # Configure Streamlit page
