@@ -290,6 +290,9 @@ class NVIDIAServicesClient:
         if config.nvidia.use_ollama_for_llm:
             endpoint = f"{config.nvidia.ollama_base_url}/api/chat"
             logger.info(f"Routing LLM request to Ollama: {endpoint}")
+        elif config.nvidia.use_vllm_for_llm:
+            endpoint = f"{config.nvidia.vllm_base_url}/v1/chat/completions"
+            logger.info(f"Routing LLM request to vLLM: {endpoint}")
         else:
             endpoint = f"{self.llm_url}/v1/chat/completions"
             logger.info(f"Routing LLM request to NVIDIA NIM: {endpoint}")
@@ -313,6 +316,20 @@ class NVIDIAServicesClient:
             # Note: Ollama doesn't use max_tokens in the same way as OpenAI
             if max_tokens is not None:
                 payload["options"]["num_predict"] = max_tokens
+
+        elif config.nvidia.use_vllm_for_llm:
+            # vLLM API format
+            payload = {
+                "model": "Qwen/Qwen3-14B-AWQ",
+                "messages": messages,
+                "temperature": temperature if temperature is not None else 0.7,
+                "stream": False
+            }
+
+            if max_tokens is not None:
+                payload["max_tokens"] = max_tokens
+                
+            #print(f"🔍 DEBUG: vLLM LLM Payload: {json.dumps(payload, indent=2)}")
         else:
             # NVIDIA NIM API format
             payload = {

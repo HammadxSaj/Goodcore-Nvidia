@@ -16,7 +16,9 @@ class NVIDIAConfig:
     timeout: int = 1000
     max_retries: int = 3
     ollama_base_url: str = "http://localhost:11434"
-    use_ollama_for_llm: bool = True
+    use_ollama_for_llm: bool = False
+    vllm_base_url: str = "http://localhost:8001"  # Default vLLM URL
+    use_vllm_for_llm: bool = True  # Set to True to use
 
 @dataclass
 class VectorDBConfig:
@@ -32,7 +34,7 @@ class DataConfig:
     speakers_file: str = "./data/raw/speakersdata.csv"
     topics_file: str = "./data/raw/speakertopics.csv"
     processed_data_dir: str = "./data/processed"
-    batch_size: int = 100
+    batch_size: int = 100 
 
 @dataclass
 class APIConfig:
@@ -46,7 +48,7 @@ class APIConfig:
 @dataclass
 class AppConfig:
     """Application-level configuration"""
-    max_results: int = 20
+    max_results: int = 10
     similarity_threshold: float = 0.3
     cache_ttl: int = 3600  # 1 hour
     log_level: str = "INFO"
