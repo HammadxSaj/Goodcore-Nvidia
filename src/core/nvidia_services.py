@@ -416,14 +416,190 @@ class NVIDIAServicesClient:
             error="Max retries exceeded"
         )
 
+    # async def rerank_results(
+    #     self,
+    #     query: str,
+    #     candidates: List[Dict[str, Any]],
+    #     top_k: int = 10
+    # ) -> RerankResponse:
+    #     """Rerank search results using NVIDIA reranking model"""
+
+    #     if not candidates:
+    #         return RerankResponse(
+    #             rankings=[],
+    #             usage={},
+    #             model=self.reranker_model,
+    #             success=False,
+    #             error="No candidates provided"
+    #         )
+
+    #     # Wait for rate limit
+    #     await self.rate_limiter.wait_if_needed()
+
+    #     # Prepare candidates for reranking - using passages format as per NVIDIA docs
+    #     passages = []
+    #     for candidate in candidates:
+    #         # Use searchable_text or create a text representation
+    #         doc_text = candidate.get('searchable_text', '')
+    #         if not doc_text:
+    #             doc_text = f"{candidate.get('name', '')} {candidate.get('job_title', '')} {candidate.get('bio', '')}"
+    #         # passages.append({"text": doc_text})
+    #         passages.append(doc_text)
+
+    #     # Format payload according to NVIDIA NIM documentation
+    #     # payload = {
+    #     #     "model": self.reranker_model,
+    #     #     "query": {"text": query},  # Query must be an object with "text" field
+    #     #     "passages": passages,      # Use "passages" instead of "documents"                                                                                            
+    #     #     "top_k": min(top_k, len(passages)),
+    #     #     "truncate": "END"  # Add truncate parameter as shown in docs
+    #     # }
+
+    #     payload = {
+    #         "model": "Qwen/Qwen3-Reranker-0.6B",  # Use the specific reranker model
+    #         "query": query,
+    #         "documents": passages,
+    #         "top_k": min(top_k, len(passages)),
+    #     }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           
+
+    #     logger.info(f"Reranking {len(candidates)} candidates")
+    #     logger.debug(f"Rerank payload: {json.dumps(payload, indent=2)}")
+
+    #     for attempt in range(self.max_retries):
+    #         try:
+    #             async with aiohttp.ClientSession() as session:
+    #                 async with session.post(
+    #                     # f"{self.reranker_url}/v1/ranking",
+    #                     f"http://{self.base_host}:8060/v2/rerank",
+    #                     json=payload,
+    #                     headers=self.headers,
+    #                     timeout=aiohttp.ClientTimeout(total=self.timeout)
+    #                 ) as response:
+
+    #                     if response.status == 200:
+    #                         result = await response.json()
+    #                         # DEBUG: Print detailed reranking response
+    #                         print(f"\n🔍 DEBUG: Reranking API Response:")
+    #                         print(f"Response status: {response.status}")
+    #                         print(f"Response keys: {list(result.keys())}")
+    #                         print(f"Full response: {json.dumps(result, indent=2)}")
+
+    #                         logger.debug(f"Rerank response: {json.dumps(result, indent=2)}")
+
+    #                         ranked_candidates = []
+
+    #                         for item in result.get('results', []):
+    #                             original_index = item['index']
+    #                             candidate = candidates[original_index].copy()
+    #                             candidate['rerank_score'] = item['relevance_score']
+    #                             ranked_candidates.append(candidate)
+
+    #                         # Check response structure and handle different formats
+    #                         # rankings = []
+
+    #                         # # Try different possible response structures
+    #                         # if 'rankings' in result:
+    #                         #     # Handle NVIDIA NIM reranker response format with logits
+    #                         #     for i, item in enumerate(result['rankings']):
+    #                         #         original_idx = item['index']
+    #                         #         candidate = candidates[original_idx].copy()
+
+    #                         #         # Convert logit to normalized score (0-1 range)
+    #                         #         logit = item.get('logit', 0.0)
+    #                         #         # Use sigmoid function to convert logit to probability
+    #                         #         import math
+    #                         #         rerank_score = 1.0 / (1.0 + math.exp(-logit))
+
+    #                         #         candidate['rerank_score'] = rerank_score
+    #                         #         candidate['rerank_position'] = i + 1
+    #                         #         rankings.append(candidate)
+    #                         # elif 'data' in result:
+    #                         #     # Another possible format
+    #                         #     for i, item in enumerate(result['data']):
+    #                         #         original_idx = item.get('index', i)
+    #                         #         if original_idx < len(candidates):
+    #                         #             candidate = candidates[original_idx].copy()
+    #                         #             candidate['rerank_score'] = item.get('relevance_score', item.get('score', 0.0))
+    #                         #             candidate['rerank_position'] = len(rankings) + 1
+    #                         #             rankings.append(candidate)
+    #                         # else:
+    #                         #     # Fallback: return original order with dummy scores
+    #                         #     logger.warning(f"Unexpected rerank response format. Keys: {list(result.keys())}")
+    #                         #     for i, candidate in enumerate(candidates[:top_k]):
+    #                         #         candidate_copy = candidate.copy()
+    #                         #         candidate_copy['rerank_score'] = 1.0 - (i * 0.1)  # Dummy decreasing scores
+    #                         #         candidate_copy['rerank_position'] = i + 1
+    #                         #         rankings.append(candidate_copy)
+
+    #                         #TEI part here
+
+    #                         # ranked_candidates = []
+    #                         # for item in result:
+    #                         #     original_index = item['index']
+    #                         #     candidate = candidates[original_index].copy()
+    #                         #     candidate['rerank_score'] = item['score']
+    #                         #     ranked_candidates.append(candidate)
+
+    #                         #     # Sort by the new score, as TEI might not guarantee order
+    #                         #     ranked_candidates.sort(key=lambda x: x['rerank_score'], reverse=True)
+
+
+    #                         return RerankResponse(
+    #                             rankings=ranked_candidates[:top_k],
+    #                             usage=result.get('usage', {}),
+    #                             model=self.reranker_model,
+    #                             success=True
+    #                         )
+    #                     else:
+    #                         error_text = await response.text()
+    #                         logger.warning(f"Rerank request failed (attempt {attempt + 1}): {response.status} - {error_text}")
+
+    #                         if attempt == self.max_retries - 1:
+    #                             # Return original candidates without reranking
+    #                             # return RerankResponse(
+    #                             #     rankings=candidates[:top_k],
+    #                             #     usage={},
+    #                             #     model=self.reranker_model,
+    #                             #     success=False,
+    #                             #     error=f"HTTP {response.status}: {error_text}"
+    #                             # )
+
+    #                             return RerankResponse(rankings=[], usage={}, model=self.reranker_model, success=False, error=f"HTTP {response.status}: {error_text}")
+    #                         await asyncio.sleep(2 ** attempt)
+
+    #         except Exception as e:
+    #             logger.warning(f"Rerank request exception (attempt {attempt + 1}): {e}")
+    #             logger.debug(f"Exception details: {type(e).__name__}: {str(e)}")
+
+    #             if attempt == self.max_retries - 1:
+    #                 # return RerankResponse(
+    #                 #     rankings=candidates[:top_k],
+    #                 #     usage={},
+    #                 #     model=self.reranker_model,
+    #                 #     success=False,
+    #                 #     error=str(e)
+    #                 # )
+
+    #                 return RerankResponse(rankings=[], usage={}, model=self.reranker_model, success=False, error=str(e))
+    #             await asyncio.sleep(2 ** attempt)
+
+    #     # return RerankResponse(
+    #     #     rankings=candidates[:top_k],
+    #     #     usage={},
+    #     #     model=self.reranker_model,
+    #     #     success=False,
+    #     #     error="Max retries exceeded"
+    #     # )
+
+    #     return RerankResponse(rankings=[], usage={}, model=self.reranker_model, success=False, error="Max retries exceeded")
+
     async def rerank_results(
         self,
         query: str,
         candidates: List[Dict[str, Any]],
         top_k: int = 10
     ) -> RerankResponse:
-        """Rerank search results using NVIDIA reranking model"""
-
+        """Reranks search results using a vLLM-hosted reranking model."""
         if not candidates:
             return RerankResponse(
                 rankings=[],
@@ -433,130 +609,71 @@ class NVIDIAServicesClient:
                 error="No candidates provided"
             )
 
-        # Wait for rate limit
         await self.rate_limiter.wait_if_needed()
 
-        # Prepare candidates for reranking - using passages format as per NVIDIA docs
-        passages = []
-        for candidate in candidates:
-            # Use searchable_text or create a text representation
-            doc_text = candidate.get('searchable_text', '')
-            if not doc_text:
-                doc_text = f"{candidate.get('name', '')} {candidate.get('job_title', '')} {candidate.get('bio', '')}"
-            passages.append({"text": doc_text})
+        documents = [
+            candidate.get('searchable_text') or f"{candidate.get('name', '')} {candidate.get('job_title', '')} {candidate.get('bio', '')}".strip()
+            for candidate in candidates
+        ]
 
-        # Format payload according to NVIDIA NIM documentation
+        # Payload for the vLLM /rerank endpoint (Cohere-compatible)
         payload = {
             "model": self.reranker_model,
-            "query": {"text": query},  # Query must be an object with "text" field
-            "passages": passages,      # Use "passages" instead of "documents"
-            "top_k": min(top_k, len(passages)),
-            "truncate": "END"  # Add truncate parameter as shown in docs
+            "query": query,
+            "documents": documents,
+            "top_n": min(top_k, len(documents)),  # Use top_n for Cohere compatibility
+            "return_documents": False  # More efficient as we already have the docs
         }
 
-        logger.info(f"Reranking {len(candidates)} candidates")
+        logger.info(f"Reranking {len(candidates)} candidates for query: '{query}'")
         logger.debug(f"Rerank payload: {json.dumps(payload, indent=2)}")
 
         for attempt in range(self.max_retries):
             try:
                 async with aiohttp.ClientSession() as session:
+                    # Using the /v1/rerank endpoint, which is designed for this task
                     async with session.post(
-                        f"{self.reranker_url}/v1/ranking",
+                        f"http://{self.base_host}:8060/v1/rerank",
                         json=payload,
                         headers=self.headers,
                         timeout=aiohttp.ClientTimeout(total=self.timeout)
                     ) as response:
+                        response_json = await response.json()
 
                         if response.status == 200:
-                            result = await response.json()
-                            # DEBUG: Print detailed reranking response
-                            print(f"\n🔍 DEBUG: Reranking API Response:")
-                            print(f"Response status: {response.status}")
-                            print(f"Response keys: {list(result.keys())}")
-                            print(f"Full response: {json.dumps(result, indent=2)}")
+                            logger.debug(f"Rerank response: {json.dumps(response_json, indent=2)}")
 
-                            logger.debug(f"Rerank response: {json.dumps(result, indent=2)}")
+                            ranked_candidates = []
+                            # The response contains a 'results' list with 'index' and 'relevance_score'
+                            results = response_json.get('results', [])
+                            for item in results:
+                                original_index = item['index']
+                                candidate = candidates[original_index].copy()
+                                candidate['rerank_score'] = item['relevance_score']
+                                ranked_candidates.append(candidate)
 
-                            # Check response structure and handle different formats
-                            rankings = []
-
-                            # Try different possible response structures
-                            if 'rankings' in result:
-                                # Handle NVIDIA NIM reranker response format with logits
-                                for i, item in enumerate(result['rankings']):
-                                    original_idx = item['index']
-                                    candidate = candidates[original_idx].copy()
-
-                                    # Convert logit to normalized score (0-1 range)
-                                    logit = item.get('logit', 0.0)
-                                    # Use sigmoid function to convert logit to probability
-                                    import math
-                                    rerank_score = 1.0 / (1.0 + math.exp(-logit))
-
-                                    candidate['rerank_score'] = rerank_score
-                                    candidate['rerank_position'] = i + 1
-                                    rankings.append(candidate)
-                            elif 'data' in result:
-                                # Another possible format
-                                for i, item in enumerate(result['data']):
-                                    original_idx = item.get('index', i)
-                                    if original_idx < len(candidates):
-                                        candidate = candidates[original_idx].copy()
-                                        candidate['rerank_score'] = item.get('relevance_score', item.get('score', 0.0))
-                                        candidate['rerank_position'] = len(rankings) + 1
-                                        rankings.append(candidate)
-                            else:
-                                # Fallback: return original order with dummy scores
-                                logger.warning(f"Unexpected rerank response format. Keys: {list(result.keys())}")
-                                for i, candidate in enumerate(candidates[:top_k]):
-                                    candidate_copy = candidate.copy()
-                                    candidate_copy['rerank_score'] = 1.0 - (i * 0.1)  # Dummy decreasing scores
-                                    candidate_copy['rerank_position'] = i + 1
-                                    rankings.append(candidate_copy)
-
+                            # The API returns the results already sorted by relevance
                             return RerankResponse(
-                                rankings=rankings,
-                                usage=result.get('usage', {}),
-                                model=self.reranker_model,
+                                rankings=ranked_candidates,
+                                usage=response_json.get('usage', {}),
+                                model=response_json.get('model', self.reranker_model),
                                 success=True
                             )
                         else:
-                            error_text = await response.text()
-                            logger.warning(f"Rerank request failed (attempt {attempt + 1}): {response.status} - {error_text}")
+                            error_message = response_json.get('detail', await response.text())
+                            logger.warning(f"Rerank request failed (attempt {attempt + 1}/{self.max_retries}): {response.status} - {error_message}")
+                            return RerankResponse(rankings=[], usage={}, model=self.reranker_model, success=False, error=f"HTTP {response.status}: {error_message}")
 
-                            if attempt == self.max_retries - 1:
-                                # Return original candidates without reranking
-                                return RerankResponse(
-                                    rankings=candidates[:top_k],
-                                    usage={},
-                                    model=self.reranker_model,
-                                    success=False,
-                                    error=f"HTTP {response.status}: {error_text}"
-                                )
-
-                            await asyncio.sleep(2 ** attempt)
-
+            except aiohttp.ClientConnectorError as e:
+                logger.error(f"Rerank connection error (attempt {attempt + 1}/{self.max_retries}): {e}")
             except Exception as e:
-                logger.warning(f"Rerank request exception (attempt {attempt + 1}): {e}")
-                logger.debug(f"Exception details: {type(e).__name__}: {str(e)}")
+                logger.warning(f"Rerank request exception (attempt {attempt + 1}/{self.max_retries}): {e}")
 
-                if attempt == self.max_retries - 1:
-                    return RerankResponse(
-                        rankings=candidates[:top_k],
-                        usage={},
-                        model=self.reranker_model,
-                        success=False,
-                        error=str(e)
-                    )
+            if attempt < self.max_retries - 1:
                 await asyncio.sleep(2 ** attempt)
 
-        return RerankResponse(
-            rankings=candidates[:top_k],
-            usage={},
-            model=self.reranker_model,
-            success=False,
-            error="Max retries exceeded"
-        )
+        logger.error("Reranking failed after max retries.")
+        return RerankResponse(rankings=[], usage={}, model=self.reranker_model, success=False, error="Max retries exceeded")
 
     def calculate_similarity(
         self,

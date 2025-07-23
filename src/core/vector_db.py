@@ -107,7 +107,8 @@ class VectorDatabase:
                 searchable_text = self._create_searchable_text(speaker)
 
             # Truncate text to fit within token limits
-            truncated_text = self._truncate_text_for_embedding(searchable_text)
+            #change for nvidia back to truncated_text = self._truncate_text_for_embedding(searchable_text)
+            truncated_text = searchable_text
 
             texts_to_embed.append(truncated_text)
             speaker_indices.append(i)

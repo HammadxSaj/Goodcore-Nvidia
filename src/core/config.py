@@ -9,9 +9,11 @@ class NVIDIAConfig:
     """NVIDIA services configuration"""
     # base_url: str = "http://localhost:8000"
     base_url: str = "http://localhost:11434"  # Updated to Ollama URL
-    embedding_model: str = "snowflake/arctic-embed-l"
+    # embedding_model: str = "snowflake/arctic-embed-l"
+    embedding_model: str = "janni-t/qwen3-embedding-0.6b-tei-onnx"
     llm_model: str = "qwen3:32b"  # Updated to use Qwen3 model
-    reranker_model: str = "nvidia/llama-3.2-nemoretriever-500m-rerank-v2"
+    # reranker_model: str = "nvidia/llama-3.2-nemoretriever-500m-rerank-v2"
+    reranker_model: str = "tomaarsen/Qwen3-Reranker-0.6B-seq-cls"
     api_key: str = ""
     timeout: int = 1000
     max_retries: int = 3
