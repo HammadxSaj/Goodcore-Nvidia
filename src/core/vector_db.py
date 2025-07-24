@@ -128,7 +128,11 @@ class VectorDatabase:
 
             # Process each speaker
             for i, speaker in enumerate(speakers_data):
-                speaker_id = speaker.get('id') or str(uuid.uuid4())
+                # speaker_id = speaker.get('id') or str(uuid.uuid4())
+                speaker_id = str(speaker.get('id'))
+                if not speaker_id:
+                    logger.warning(f"Speaker {i} has no ID")
+                    continue
 
                 # Prepare embedding
                 speaker_embedding = embedding_response.embeddings[i]
@@ -521,6 +525,9 @@ class VectorDatabase:
         """Prepare metadata for ChromaDB (must be simple types)"""
 
         metadata = {}
+
+        if speaker.get('id'):
+            metadata['id'] = speaker['id']
 
         # Add simple fields
         for field in ['name', 'job_title', 'company', 'location', 'bio']:

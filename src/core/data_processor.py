@@ -204,7 +204,8 @@ class SpeakerDataProcessor:
 
         # Basic speaker information - with safe extraction
         profile = {
-            "speaker_id": int(speaker_id),
+            # "speaker_id": int(speaker_id),
+            "id": int(speaker_id),
             "name": str(self._safe_get_value(first_row, "name", "Unknown")).strip(),
             "email": str(self._safe_get_value(first_row, "email", "")).strip(),
             "job_title": str(self._safe_get_value(first_row, "job_title", "")).strip(),
@@ -276,7 +277,7 @@ class SpeakerDataProcessor:
     def _create_profile_from_speaker_only(self, speaker_id: int, speaker_row: pd.Series) -> Optional[Dict[str, Any]]:
         """Create profile for speaker without topic mappings"""
         profile = {
-            'speaker_id': int(speaker_id),
+            'id': int(speaker_id),
             'name': str(self._safe_get_value(speaker_row, 'name', 'Unknown')).strip(),
             'email': str(self._safe_get_value(speaker_row, 'email', '')).strip(),
             'job_title': str(self._safe_get_value(speaker_row, 'job_title', '')).strip(),
@@ -518,7 +519,7 @@ class SpeakerDataProcessor:
             self.create_speaker_profiles()
 
         for profile in self.speaker_profiles:
-            if profile['speaker_id'] == speaker_id:
+            if profile['id'] == id:
                 return profile
 
         return None
