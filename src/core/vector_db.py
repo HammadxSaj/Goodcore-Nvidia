@@ -246,6 +246,148 @@ class VectorDatabase:
             logger.error(f"Error searching speakers: {e}")
             return {"success": False, "error": str(e), "candidates": []}
 
+    # async def hybrid_search(
+    #     self,
+    #     query_embedding: List[float],
+    #     query_text: str,
+    #     filters: Optional[Dict[str, Any]] = None,
+    #     limit: int = 20
+    # ) -> Dict[str, Any]:
+    #     """Perform hybrid search: Vector + BM25 + RRF fusion + Reranking"""
+    
+    #     try:           
+    #         logger.info(f"Starting hybrid search for: '{query_text}'")
+            
+    #         # Step 1: Vector Search
+    #         logger.info("🔍 Performing vector search...")
+    #         vector_results = []
+            
+    #         collection = self.client.get_collection(name=self.collection_name)
+    #         vector_search_results = collection.query(
+    #             query_embeddings=[query_embedding],
+    #             n_results=limit,  # Get more results for better fusion
+    #             include=["documents", "metadatas", "distances"]
+    #         )
+            
+    #         if vector_search_results['documents'] and vector_search_results['documents'][0]:
+    #             documents = vector_search_results['documents'][0]
+    #             metadatas = vector_search_results['metadatas'][0] if vector_search_results['metadatas'] else [{}] * len(documents)
+    #             distances = vector_search_results['distances'][0] if vector_search_results['distances'] else [0.0] * len(documents)
+    #             ids = vector_search_results['ids'][0] if vector_search_results['ids'] else [str(i) for i in range(len(documents))]
+                
+    #             for i, doc in enumerate(documents):
+    #                 metadata = metadatas[i] if i < len(metadatas) else {}
+    #                 distance = distances[i] if i < len(distances) else 0.0
+    #                 doc_id = ids[i] if i < len(ids) else str(i)
+                    
+    #                 # Convert distance to similarity
+    #                 similarity = 1.0 - distance
+                    
+    #                 result = {
+    #                     'speaker_id': doc_id,
+    #                     'id': doc_id,
+    #                     'document': doc,
+    #                     'metadata': metadata,
+    #                     'similarity_score': similarity,
+    #                     **metadata  # Flatten metadata
+    #                 }
+    #                 vector_results.append(result)
+            
+    #         logger.info(f"Vector search found {len(vector_results)} results")
+            
+    #         # Step 2: BM25 Search
+    #         logger.info("🔍 Performing BM25 search...")
+    #         bm25_results = bm25_service.search(query_text, limit=limit)
+    #         logger.info(f"BM25 search found {len(bm25_results)} results")
+            
+    #         # Step 3: Fusion (if we have both results)
+    #         if vector_results and bm25_results:
+    #             logger.info("🔄 Performing RRF fusion...")
+    #             fused_results = reciprocal_rank_fusion(
+    #                 vector_results=vector_results,
+    #                 bm25_results=bm25_results,
+    #                 vector_weight=0.5,  
+    #                 bm25_weight=0.5
+    #             )
+    #             candidates = fused_results[:limit]  # Get more for reranking
+    #             logger.info(f"Fusion produced {len(candidates)} candidates")
+                
+    #         elif vector_results:
+    #             logger.info("📊 Using vector-only results (no BM25 matches)")
+    #             candidates = vector_results[:limit]
+                
+    #         elif bm25_results:
+    #             logger.info("📊 Using BM25-only results (no vector matches)")
+    #             # Convert BM25 results to standard format
+    #             candidates = []
+    #             for idx, score, speaker_data in bm25_results[:limit]:
+    #                 candidate = speaker_data.copy()
+    #                 candidate.update({
+    #                     'bm25_score': score,
+    #                     'similarity_score': min(score / 10.0, 1.0),  # Normalize BM25 score
+    #                     'search_type': 'bm25_only'
+    #                 })
+    #                 candidates.append(candidate)
+                    
+    #         else:
+    #             logger.info("❌ No results from either search method")
+    #             return {
+    #                 "success": True,
+    #                 "candidates": [],
+    #                 "total_found": 0,
+    #                 "search_type": "no_results"
+    #             }
+            
+    #         # Step 4: Reranking
+    #         if candidates:
+    #             logger.info(f"🎯 Reranking {len(candidates)} candidates...")
+    #             try:
+    #                 rerank_response = await nvidia_client.rerank_results(
+    #                     query=query_text,
+    #                     candidates=candidates,
+    #                     top_k=limit
+    #                 )
+                    
+    #                 if rerank_response.success:
+    #                     logger.info(f"✅ Reranking successful, returning {len(rerank_response.rankings)} results")
+    #                     return {
+    #                         "success": True,
+    #                         "candidates": rerank_response.rankings,
+    #                         "total_found": len(rerank_response.rankings),
+    #                         "search_type": "hybrid_vector_bm25_reranked"
+    #                     }
+    #                 else:
+    #                     logger.warning(f"Reranking failed: {rerank_response.error}")
+                        
+    #             except Exception as e:
+    #                 logger.error(f"Error in reranking: {e}")
+                
+    #             # Fallback: return fused results without reranking
+    #             logger.info("📋 Returning fused results without reranking")
+    #             return {
+    #                 "success": True,
+    #                 "candidates": candidates[:limit],
+    #                 "total_found": len(candidates),
+    #                 "search_type": "hybrid_vector_bm25_no_rerank"
+    #             }
+            
+    #         return {
+    #             "success": True,
+    #             "candidates": [],
+    #             "total_found": 0,
+    #             "search_type": "no_candidates"
+    #         }
+            
+    #     except Exception as e:
+    #         logger.error(f"Error in hybrid search: {e}")
+    #         return {
+    #             "success": False,
+    #             "candidates": [],
+    #             "total_found": 0,
+    #             "search_type": "error",
+    #             "error": str(e)
+    #         }
+
     async def hybrid_search(
         self,
         query_embedding: List[float],
@@ -254,90 +396,87 @@ class VectorDatabase:
         limit: int = 20
     ) -> Dict[str, Any]:
         """Perform hybrid search: Vector + BM25 + RRF fusion + Reranking"""
-    
-        try:           
-            logger.info(f"Starting hybrid search for: '{query_text}'")
-            
-            # Step 1: Vector Search
-            logger.info("🔍 Performing vector search...")
-            vector_results = []
-            
+
+        def _perform_vector_search() -> List[Dict[str, Any]]:
+            """Synchronous vector search operation"""
             collection = self.client.get_collection(name=self.collection_name)
             vector_search_results = collection.query(
                 query_embeddings=[query_embedding],
-                n_results=limit,  # Get more results for better fusion
+                n_results=limit,
                 include=["documents", "metadatas", "distances"]
             )
-            
+
+            vector_results = []
             if vector_search_results['documents'] and vector_search_results['documents'][0]:
                 documents = vector_search_results['documents'][0]
                 metadatas = vector_search_results['metadatas'][0] if vector_search_results['metadatas'] else [{}] * len(documents)
                 distances = vector_search_results['distances'][0] if vector_search_results['distances'] else [0.0] * len(documents)
                 ids = vector_search_results['ids'][0] if vector_search_results['ids'] else [str(i) for i in range(len(documents))]
-                
+
                 for i, doc in enumerate(documents):
                     metadata = metadatas[i] if i < len(metadatas) else {}
                     distance = distances[i] if i < len(distances) else 0.0
                     doc_id = ids[i] if i < len(ids) else str(i)
-                    
-                    # Convert distance to similarity
                     similarity = 1.0 - distance
-                    
+
                     result = {
                         'speaker_id': doc_id,
                         'id': doc_id,
                         'document': doc,
                         'metadata': metadata,
                         'similarity_score': similarity,
-                        **metadata  # Flatten metadata
+                        **metadata
                     }
                     vector_results.append(result)
-            
+            return vector_results
+
+        def _perform_bm25_search() -> List[Tuple[int, float, Dict[str, Any]]]:
+            """Synchronous BM25 search operation"""
+            return bm25_service.search(query_text, limit=limit)
+
+        try:
+            logger.info(f"Starting hybrid search for: '{query_text}'")
+
+            # Step 1 & 2: Perform Vector and BM25 search in parallel
+            logger.info("🔍 Performing vector and BM25 search in parallel...")
+            vector_search_task = asyncio.to_thread(_perform_vector_search)
+            bm25_search_task = asyncio.to_thread(_perform_bm25_search)
+
+            results = await asyncio.gather(vector_search_task, bm25_search_task)
+            vector_results, bm25_results = results
+
             logger.info(f"Vector search found {len(vector_results)} results")
-            
-            # Step 2: BM25 Search
-            logger.info("🔍 Performing BM25 search...")
-            bm25_results = bm25_service.search(query_text, limit=limit)
             logger.info(f"BM25 search found {len(bm25_results)} results")
-            
+
             # Step 3: Fusion (if we have both results)
             if vector_results and bm25_results:
                 logger.info("🔄 Performing RRF fusion...")
                 fused_results = reciprocal_rank_fusion(
                     vector_results=vector_results,
                     bm25_results=bm25_results,
-                    vector_weight=0.5,  
+                    vector_weight=0.5,
                     bm25_weight=0.5
                 )
-                candidates = fused_results[:limit]  # Get more for reranking
+                candidates = fused_results[:limit]
                 logger.info(f"Fusion produced {len(candidates)} candidates")
-                
             elif vector_results:
                 logger.info("📊 Using vector-only results (no BM25 matches)")
                 candidates = vector_results[:limit]
-                
             elif bm25_results:
                 logger.info("📊 Using BM25-only results (no vector matches)")
-                # Convert BM25 results to standard format
                 candidates = []
                 for idx, score, speaker_data in bm25_results[:limit]:
                     candidate = speaker_data.copy()
                     candidate.update({
                         'bm25_score': score,
-                        'similarity_score': min(score / 10.0, 1.0),  # Normalize BM25 score
+                        'similarity_score': min(score / 10.0, 1.0),
                         'search_type': 'bm25_only'
                     })
                     candidates.append(candidate)
-                    
             else:
                 logger.info("❌ No results from either search method")
-                return {
-                    "success": True,
-                    "candidates": [],
-                    "total_found": 0,
-                    "search_type": "no_results"
-                }
-            
+                return {"success": True, "candidates": [], "total_found": 0, "search_type": "no_results"}
+
             # Step 4: Reranking
             if candidates:
                 logger.info(f"🎯 Reranking {len(candidates)} candidates...")
@@ -347,9 +486,8 @@ class VectorDatabase:
                         candidates=candidates,
                         top_k=limit
                     )
-                    
                     if rerank_response.success:
-                        logger.info(f"✅ Reranking successful, returning {len(rerank_response.rankings)} results")
+                        logger.info(f"✅ Reranking successful, returning  {len(rerank_response.rankings)} results")
                         return {
                             "success": True,
                             "candidates": rerank_response.rankings,
@@ -358,11 +496,9 @@ class VectorDatabase:
                         }
                     else:
                         logger.warning(f"Reranking failed: {rerank_response.error}")
-                        
                 except Exception as e:
                     logger.error(f"Error in reranking: {e}")
-                
-                # Fallback: return fused results without reranking
+
                 logger.info("📋 Returning fused results without reranking")
                 return {
                     "success": True,
@@ -370,23 +506,13 @@ class VectorDatabase:
                     "total_found": len(candidates),
                     "search_type": "hybrid_vector_bm25_no_rerank"
                 }
-            
-            return {
-                "success": True,
-                "candidates": [],
-                "total_found": 0,
-                "search_type": "no_candidates"
-            }
-            
+
+            return {"success": True, "candidates": [], "total_found": 0, "search_type": "no_candidates"}
+
         except Exception as e:
             logger.error(f"Error in hybrid search: {e}")
-            return {
-                "success": False,
-                "candidates": [],
-                "total_found": 0,
-                "search_type": "error",
-                "error": str(e)
-            }
+            return {"success": False, "candidates": [], "total_found": 0, "search_type": "error", "error": str(e)}
+
 
     def _build_basic_where_clause(self, filters: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Build ChromaDB where clause for basic filters only (no mandatory criteria)"""

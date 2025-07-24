@@ -353,6 +353,7 @@ async def _generate_recommendation_with_llm(speakers: List[Dict[str, Any]], orig
 3. Explain briefly (1-2 sentences) why this speaker is the top choice
 4. Be natural and conversational, as if speaking directly to the event organizer
 5. Focus on the speaker's relevant expertise and credentials
+6. If there are no speakers available, just say that there are no speakers available.
 
 **Output Format:**
 Provide only the recommendation text, no additional formatting or labels."""
@@ -961,6 +962,7 @@ You MUST return a single JSON object with a list named "shortlist". Each item in
     -   Do not write anything about any field being "missing" or "not specified". Focus on the strengths of the selected speaker.
 4.  **Guardrail:** Base your analysis STRICTLY on the provided speaker information. Do not invent or infer details not present in the context.
 6.  **Tone:** Be concise, professional, and direct.
+7. if there are no speakers available, just say that there are no speakers available.
 
 **Output Format:**
 - You MUST use the following Markdown structure. Do not add any other text.
