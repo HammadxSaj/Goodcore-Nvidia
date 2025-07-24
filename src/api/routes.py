@@ -667,6 +667,11 @@ async def get_system_stats():
 @router.post("/search")
 async def search_speakers(search_query: SearchQuery):
     """Search for speakers based on query - Following the exact flow from test"""
+    import time
+
+    start_time = time.time()
+
+
     if not speakers_loaded:
         return ErrorResponse(
             message="Our speaker database is currently loading. Please try again in a few moments.",
@@ -1030,7 +1035,11 @@ If there is conversation history, you can use it to provide context, but do not 
                 explanation = explanation_prefix + llm_content.strip()
 
         # Calculate search time
-        search_time = int((datetime.now() - start_time).total_seconds() * 1000)
+        end_time = datetime.now()
+
+        search_time = int((end_time - start_time).total_seconds() * 1000)
+
+        logger.info(f"🔍 Search completed in {search_time} ms")
 
         return SearchResponse(
             speakers=final_speaker_results,  # Use the shortlisted results
