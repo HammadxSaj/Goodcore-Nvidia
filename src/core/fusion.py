@@ -100,9 +100,6 @@ def reciprocal_rank_fusion(
         # Sort by RRF score (descending)
         fused_results.sort(key=lambda x: x.get("rrf_score", 0.0), reverse=True)
 
-        # print("-------------------------------------------------------------------------")
-        # print("Fused results:", fused_results)
-
         logger.info(
             f"RRF fusion: {len(vector_results)} vector + {len(bm25_results)} BM25 → {len(fused_results)} fused results"
         )

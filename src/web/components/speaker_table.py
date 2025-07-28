@@ -21,8 +21,6 @@ def display_speaker_table(speakers: List[Dict[str, Any]]):
         topics = speaker.get("speaking_topics", [])
         if isinstance(topics, list):
             topics_str = ", ".join(topics)  # Show first 3 topics
-            # if len(topics) > 3:
-            #     topics_str += f" (+{len(topics)-3} more)"
         else:
             topics_str = str(topics)
 
@@ -82,7 +80,7 @@ def display_speaker_table(speakers: List[Dict[str, Any]]):
             col1, col2 = st.columns([1, 1])
 
             with col1:
-                #st.write("**Speaker ID:**", speaker.get("id", "N/A"))
+                st.write("**Speaker ID:**", speaker.get("id", "N/A"))
                 st.write("**Company:**", speaker.get("company", "N/A"))
                 st.write("**Center/Location:**", speaker.get("centers", "N/A"))
                 st.write("**Target Audiences:**", speaker.get("audiences", "N/A"))

@@ -675,33 +675,6 @@ class NVIDIAServicesClient:
         logger.error("Reranking failed after max retries.")
         return RerankResponse(rankings=[], usage={}, model=self.reranker_model, success=False, error="Max retries exceeded")
 
-    def calculate_similarity(
-        self,
-        embedding1: List[float],
-        embedding2: List[float]
-    ) -> float:
-        """Calculate cosine similarity between two embeddings"""
-
-        try:
-            # Convert to numpy arrays
-            vec1 = np.array(embedding1)
-            vec2 = np.array(embedding2)
-
-            # Calculate cosine similarity
-            dot_product = np.dot(vec1, vec2)
-            norm1 = np.linalg.norm(vec1)
-            norm2 = np.linalg.norm(vec2)
-
-            if norm1 == 0 or norm2 == 0:
-                return 0.0
-
-            similarity = dot_product / (norm1 * norm2)
-            return float(similarity)
-
-        except Exception as e:
-            logger.error(f"Error calculating similarity: {e}")
-            return 0.0
-
     async def test_all_services(self) -> Dict[str, Any]:
         """Test all NVIDIA services"""
 

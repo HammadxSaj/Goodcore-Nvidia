@@ -43,7 +43,6 @@ class APIConfig:
     """API server configuration"""
     host: str = "0.0.0.0"
     port: int = 8002
-    reload: bool = False
     log_level: str = "INFO"
     cors_origins: List[str] = field(default_factory=lambda: ["*"])
 

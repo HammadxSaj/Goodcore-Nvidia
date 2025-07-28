@@ -513,17 +513,6 @@ class SpeakerDataProcessor:
 
         return self.speaker_profiles
 
-    def get_speaker_by_id(self, speaker_id: int) -> Optional[Dict[str, Any]]:
-        """Get a specific speaker by ID"""
-        if not self.speaker_profiles:
-            self.create_speaker_profiles()
-
-        for profile in self.speaker_profiles:
-            if profile['id'] == id:
-                return profile
-
-        return None
-
     def get_data_statistics(self) -> Dict[str, Any]:
         """Get statistics about the processed data"""
         if not self.speaker_profiles:

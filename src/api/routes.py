@@ -248,7 +248,7 @@ async def _process_refinement_action(
     conversation_context = "\n".join(
         [
             f"{msg['role'].title()}: {msg['content']}"
-            for msg in conversation_history[-1:]  # Last 5 messages for context
+            for msg in conversation_history[-1:] # Only use the last message for context
         ]
     )
 
@@ -457,182 +457,6 @@ async def _handle_ui_modification(
         search_time_ms=search_time,
     )
 
-
-async def _handle_refined_search(
-    action_result: Dict[str, Any], search_query: SearchQuery, start_time: datetime
-) -> SearchResponse:
-    """Handle refined searches that require new database queries with enhanced query"""
-
-    # Use enhance_query_with_llm to synthesize conversation context + current refinement
-    enhanced_query = await query_processor.enhance_query_with_llm(
-        query=search_query.query, conversation_history=search_query.conversation_history
-    )
-
-    # Generate query embedding using the enhanced query
-    query_embedding = await query_processor._generate_query_embedding(enhanced_query)
-
-    if not query_embedding:
-        return ErrorResponse(
-            message="I'm having trouble processing your refined search.",
-            suggestion="Please try rephrasing your request.",
-        )
-
-    # Perform new search WITHOUT filters (as you requested)
-    search_results = await vector_db.hybrid_search(
-        query_embedding=query_embedding,
-        query_text=enhanced_query,
-        # filters=None,  # No filters as requested
-        limit=search_query.max_results,
-    )
-
-    if not search_results["success"]:
-        return ErrorResponse(
-            message="The refined search encountered an issue.",
-            suggestion="Try a different refinement or start a new search.",
-        )
-
-    candidates = search_results["candidates"]
-
-    # Convert to speaker results
-    speaker_results = []
-    found_speaker_ids = set()
-
-    for candidate in candidates:
-        topics = candidate.get("speaking_topics", "")
-        if isinstance(topics, str):
-            topic_list = [t.strip() for t in topics.split(",") if t.strip()]
-        else:
-            topic_list = topics if isinstance(topics, list) else []
-
-        speaker_id = (
-            candidate.get("speaker_id")
-            or candidate.get("id")
-            or candidate.get("metadata", {}).get("speaker_id")
-            or "unknown"
-        )
-
-        found_speaker_ids.add(str(speaker_id))
-
-        speaker_result = SpeakerResult(
-            speaker_id=str(speaker_id),
-            name=candidate.get(
-                "name", candidate.get("metadata", {}).get("name", "Unknown")
-            ),
-            job_title=candidate.get(
-                "job_title", candidate.get("metadata", {}).get("job_title", "")
-            ),
-            company=candidate.get(
-                "company", candidate.get("metadata", {}).get("company")
-            ),
-            speaking_topics=topic_list,
-            bio=candidate.get("bio", candidate.get("metadata", {}).get("bio", "")),
-            specializations=candidate.get(
-                "specializations",
-                candidate.get("metadata", {}).get("specializations", ""),
-            ),
-            audiences=candidate.get(
-                "audiences", candidate.get("metadata", {}).get("audiences", "")
-            ),
-            centers=candidate.get(
-                "centers", candidate.get("metadata", {}).get("centers", "")
-            ),
-            similarity_score=candidate.get("similarity_score", 0.0),
-            rerank_score=candidate.get("rerank_score"),
-        )
-        speaker_results.append(speaker_result)
-
-    # Simple speaker ID preservation - add existing speakers that aren't already in new results
-    details = action_result.get("details", {})
-    if details.get("preserve_relevant_speakers") and search_query.current_speakers:
-        for existing_speaker in search_query.current_speakers:
-            existing_speaker_id = str(existing_speaker.get("speaker_id", ""))
-
-            # Only preserve if not already in new results
-            if (
-                existing_speaker_id not in found_speaker_ids
-                and existing_speaker_id != "unknown"
-            ):
-                try:
-                    preserved_speaker = SpeakerResult(
-                        speaker_id=existing_speaker_id,
-                        name=existing_speaker.get("name", "Unknown"),
-                        job_title=existing_speaker.get("job_title", ""),
-                        company=existing_speaker.get("company"),
-                        speaking_topics=existing_speaker.get("speaking_topics", []),
-                        bio=existing_speaker.get("bio", ""),
-                        specializations=existing_speaker.get("specializations", ""),
-                        audiences=existing_speaker.get("audiences", ""),
-                        centers=existing_speaker.get("centers", ""),
-                        similarity_score=existing_speaker.get(
-                            "similarity_score", 0.5
-                        ),  # Default score
-                        rerank_score=existing_speaker.get("rerank_score"),
-                    )
-                    speaker_results.append(preserved_speaker)
-                    logger.info(
-                        f"Preserved existing speaker: {existing_speaker.get('name')} (ID: {existing_speaker_id})"
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"Could not preserve speaker {existing_speaker_id}: {e}"
-                    )
-
-    top_15_speakers = speaker_results[:15]
-
-    # Generate explanation and recommendation using LLM (same format as requested)
-    if top_15_speakers:
-        explanation = (
-            f"Found {len(top_15_speakers)} speakers matching your refined criteria."
-        )
-        recommendation = await _generate_recommendation_with_llm(
-            [speaker.__dict__ for speaker in top_15_speakers], search_query.query
-        )
-    else:
-        explanation = "No speakers found matching your refined criteria."
-        recommendation = "No speakers available for recommendation."
-
-    search_time = int((datetime.now() - start_time).total_seconds() * 1000)
-
-    return SearchResponse(
-        speakers=speaker_results,
-        explanation=explanation,
-        recommendation=recommendation,
-        query_analysis={"intent": "refined_search", "enhanced_query": enhanced_query},
-        total_results=len(speaker_results),
-        search_time_ms=search_time,
-    )
-
-
-def _speaker_meets_criteria(speaker: Dict[str, Any], criteria: Dict[str, Any]) -> bool:
-    """Check if an existing speaker meets new mandatory criteria"""
-
-    # Check job title criteria
-    if criteria.get("job_title_contains"):
-        job_title = speaker.get("job_title", "").lower()
-        if not any(
-            keyword.lower() in job_title for keyword in criteria["job_title_contains"]
-        ):
-            return False
-
-    # Check topic criteria
-    if criteria.get("topics_must_include"):
-        all_topics = f"{speaker.get('speaking_topics', '')} {speaker.get('specializations', '')}".lower()
-        if not any(
-            topic.lower() in all_topics for topic in criteria["topics_must_include"]
-        ):
-            return False
-
-    # Check center criteria
-    if criteria.get("centers_must_include"):
-        centers = speaker.get("centers", "").lower()
-        if not any(
-            center.lower() in centers for center in criteria["centers_must_include"]
-        ):
-            return False
-
-    return True
-
-
 @router.get("/health")
 async def health_check():
     """Health check endpoint"""
@@ -692,26 +516,17 @@ async def search_speakers(search_query: SearchQuery):
     try:
         logger.info(f"🔍 Processing search query: {search_query.query}")
 
-        # Phase 1: Process query (like in test)
         query_params = await query_processor.process_query(search_query.query,
                                                            conversation_history = search_query.conversation_history)
 
         query_analysis = query_params.get("llm_analysis", {})
         query_embedding = query_params.get("query_embedding")
 
-        # Extract the mandatory filters from the analysis
-        # mandatory_filters = query_analysis.get("mandatory_criteria", {})
-        # logger.info(f"Extracted mandatory filters: {mandatory_filters}")
-
         if not query_embedding:
             return ErrorResponse(
                 message="I'm having trouble understanding your query right now. Please try rephrasing your speaker search request.",
                 suggestion="Be specific about the topic, industry, or expertise you're looking for.",
             )
-
-        # logger.info(
-        #     f"Query processed - Intent: {query_analysis.get('intent', 'unknown')}"
-        # )
 
         # Phase 2: Perform hybrid search with mandatory filters
         logger.info(
@@ -720,7 +535,6 @@ async def search_speakers(search_query: SearchQuery):
         search_results = await vector_db.hybrid_search(
             query_embedding=query_embedding,
             query_text=query_params.get("enhanced_query", search_query.query),
-            #filters=mandatory_filters,  # Pass the extracted filters here
             limit=search_query.max_results,
         )
 
@@ -737,35 +551,7 @@ async def search_speakers(search_query: SearchQuery):
             f"🔍 DEBUG: Hybrid search returned {len(search_results.get('candidates', []))} candidates"
         )
 
-        # Check if we need to implement fallback logic
-        # search_had_filters = (
-        #     any(mandatory_filters.get(key) for key in mandatory_filters.keys())
-        #     if mandatory_filters
-        #     else False
-        # )
-        search_was_successful = search_results["success"]
-        results_found = len(search_results.get("candidates", [])) > 0
-
         explanation_prefix = ""
-
-        # if search_was_successful and not results_found and search_had_filters:
-        #     logger.warning(
-        #         f"Strict search for '{search_query.query}' yielded no results. Retrying with semantic search only."
-        #     )
-
-        #     # Re-run the search WITHOUT filters
-        #     search_results = await vector_db.hybrid_search(
-        #         query_embedding=query_embedding,
-        #         query_text=query_params.get("enhanced_query", search_query.query),
-        #         #filters=None,  # No filters this time
-        #         limit=search_query.max_results,
-        #     )
-
-        #     # Add a note for the user in the explanation
-        #     # explanation_prefix = "Your search included specific criteria that returned no exact matches. The results below are the closest semantic matches based on your query. "
-        #     logger.info(
-        #         f"🔍 DEBUG: Fallback search returned {len(search_results.get('candidates', []))} candidates"
-        #     )
 
         if not search_results["success"]:
             return ErrorResponse(
@@ -825,7 +611,7 @@ async def search_speakers(search_query: SearchQuery):
             )
             speaker_results.append(speaker_result)
 
-        top_15_speakers = speaker_results[:10]  # Take only top 10 for LLM shortlisting
+        top_15_speakers = speaker_results[:15]  # Take only top 15 for LLM shortlisting
 
         # NEW PHASE: LLM Shortlisting
         final_speaker_results = []
@@ -884,6 +670,8 @@ YOU MUST ABIDE BY THE FOLLOWING FORMAT, There is no need to add any additional t
 
 You MUST return a single JSON object with a list named "shortlist". Each item in the list should be an object with "speaker_id" having a string value.
 """
+
+###########################################BELOW IS THE PROMPT PROVIDED BY GEMINI WHICH DOES NOT WORK, SO WE ARE USING THE ABOVE PROMPT INSTEAD###########################################
 
 #             shortlisting_system_prompt = """/no_think Detailed thinking off. You are an elite AI Talent Scout. Your purpose is to perform a rigorous, criteria-driven analysis of speaker candidates and identify the absolute best matches for a user's request. Your judgment is precise, and you adhere strictly to the provided constraints.
 
@@ -945,6 +733,7 @@ You MUST return a single JSON object with a list named "shortlist". Each item in
             user_prompt_parts.append(f"**NEW Search Results:**\n{shortlist_context}")
 
             if previous_speakers_context:
+                ####################currently commented out since we are not using previous speakers context due to context length issues
                 # user_prompt_parts.append(f"**PREVIOUS Speakers (from earlier searches):**\n{previous_speakers_context}")
                 user_prompt_parts.append(
                     "**PREVIOUS Speakers (from earlier searches):**None"
@@ -957,9 +746,6 @@ You MUST return a single JSON object with a list named "shortlist". Each item in
             )
 
             user_prompt_for_shortlisting = "\n\n".join(user_prompt_parts)
-
-            # print(f"Shortlisting candidates with prompt: {user_prompt_for_shortlisting}")
-            # print(f"Shortlisting system prompt: {shortlisting_system_prompt}")
 
             shortlisting_response = await generate_llm_response(
                 [

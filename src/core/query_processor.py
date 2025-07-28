@@ -258,48 +258,6 @@ class QueryProcessor:
             logger.error(f"Error enhancing query: {e}")
             return query
 
-    def get_query_suggestions(self, partial_query: str) -> List[str]:
-        """Get simple query suggestions based on partial input"""
-
-        suggestions = []
-
-        # Simple predefined suggestions
-        common_patterns = [
-            "Find speakers with expertise in",
-            "Who can speak about",
-            "Find experts in",
-            "Speakers for executive audience",
-            "Technical speakers with experience in",
-            "Find speakers from industry",
-            "Who has experience with"
-        ]
-
-        # Add relevant suggestions based on partial query
-        partial_lower = partial_query.lower()
-
-        if 'cloud' in partial_lower:
-            suggestions.extend([
-                "cloud computing experts",
-                "cloud architecture specialists",
-                "AWS cloud experts"
-            ])
-        elif 'ai' in partial_lower or 'artificial' in partial_lower:
-            suggestions.extend([
-                "artificial intelligence experts",
-                "machine learning specialists", 
-                "AI strategy speakers"
-            ])
-        elif 'security' in partial_lower:
-            suggestions.extend([
-                "cybersecurity experts",
-                "security architecture specialists",
-                "data security professionals"
-            ])
-        else:
-            suggestions.extend(common_patterns[:5])
-
-        return suggestions[:8]  # Return top 8 suggestions
-
 # Global query processor instance
 query_processor = QueryProcessor()
 

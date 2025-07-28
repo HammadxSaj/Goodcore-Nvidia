@@ -703,33 +703,6 @@ class VectorDatabase:
             logger.error(f"Error getting collection stats: {e}")
             return {"success": False, "error": str(e)}
 
-    async def delete_speaker(self, speaker_id: str) -> bool:
-        """Delete a speaker from the vector database"""
-
-        if not self.collection:
-            await self.initialize_collection()
-
-        try:
-            self.collection.delete(ids=[speaker_id])
-            logger.info(f"Deleted speaker {speaker_id} from vector database")
-            return True
-
-        except Exception as e:
-            logger.error(f"Error deleting speaker {speaker_id}: {e}")
-            return False
-
-    async def update_speaker(self, speaker_id: str, speaker_data: Dict[str, Any]) -> bool:
-        """Update a speaker in the vector database"""
-
-        # For ChromaDB, we need to delete and re-add
-        deleted = await self.delete_speaker(speaker_id)
-        if not deleted:
-            return False
-
-        # Add the updated speaker
-        result = await self.add_speakers([speaker_data])
-        return result["success"]
-
     async def clear_collection(self) -> bool:
         """Clear all data from the collection"""
 

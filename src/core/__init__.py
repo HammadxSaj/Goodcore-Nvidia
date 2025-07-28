@@ -4,7 +4,7 @@ from .nvidia_services import nvidia_client, generate_embeddings, generate_llm_re
 from .query_processor import query_processor, process_query, enhance_query
 
 __all__ = [
-    "config", "Config",
+    "config", "Config", 
     "SpeakerDataProcessor", "process_speaker_data",
     "nvidia_client", "generate_embeddings", "generate_llm_response", "rerank_results",
     "query_processor", "process_query", "enhance_query"
