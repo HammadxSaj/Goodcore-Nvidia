@@ -37,8 +37,8 @@ def initialize_session_state():
         st.session_state.last_recommendation = ""
     if "is_first_search" not in st.session_state:
         st.session_state.is_first_search = True
-    if "last_search_query" not in st.session_state:
-        st.session_state.last_search_query = ""
+    if "last_enhanced_query" not in st.session_state:
+        st.session_state.last_enhanced_query = ""
 
 
 # --- API Communication ---
@@ -60,7 +60,7 @@ def call_search_api(
 
 
 def call_refine_api(
-    query: str, history: List[Dict[str, str]], current_speakers: List[Dict], original_search_query: str
+    query: str, history: List[Dict[str, str]], current_speakers: List[Dict], enhanced_query: str
 ) -> Optional[Dict[str, Any]]:
     """Call the backend refine API for conversational refinements."""
     try:
@@ -69,7 +69,7 @@ def call_refine_api(
             "max_results": 15,
             "conversation_history": history,
             "current_speakers": current_speakers,
-            "original_search_query": original_search_query,
+            "enhanced_query": enhanced_query,
         }
         response = requests.post(f"{API_BASE_URL}/refine", json=payload, timeout=1000)
         if response.status_code == 200:
@@ -191,8 +191,7 @@ def main():
 
         with st.spinner("Thinking..."):
             if search_type == "new_search" or st.session_state.is_first_search:
-                # Use regular search API
-                st.session_state.last_search_query = prompt
+                # Use search API for new searches
                 api_response = call_search_api(
                     prompt, st.session_state.conversation_history[:-1]
                 )
@@ -206,7 +205,7 @@ def main():
                     prompt,
                     st.session_state.conversation_history,
                     current_speakers_dict,
-                    st.session_state.last_search_query
+                    st.session_state.last_enhanced_query,
                 )
 
         # Process API response and update state

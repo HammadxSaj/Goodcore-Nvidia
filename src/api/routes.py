@@ -34,7 +34,7 @@ class SearchQuery(BaseModel):
     max_results: int = 10
     conversation_history: Optional[List[Dict[str, str]]] = None
     current_speakers: Optional[List[Dict[str, Any]]] = None
-    original_search_query: Optional[str] = None
+    enhanced_query: Optional[str] = None
 
 
 class SpeakerResult(BaseModel):
@@ -392,7 +392,7 @@ def _convert_list_to_string(value) -> str:
 
 
 async def _handle_ui_modification(
-    action_result: Dict[str, Any], start_time: datetime, original_search_query: Optional[str] = None
+    action_result: Dict[str, Any], start_time: datetime, enhanced_query: Optional[str] = None
 ) -> SearchResponse:
     """Handle UI modifications like removing speakers with LLM-generated recommendations"""
 
@@ -434,7 +434,7 @@ async def _handle_ui_modification(
         # Use LLM to generate a natural recommendation
         recommendation = await _generate_recommendation_with_llm(
             [speaker.model_dump() for speaker in updated_speakers],
-            original_search_query or action_result.get("original_query", "speaker search"),
+            enhanced_query or action_result.get("original_query", "speaker search"),
         )
     else:
         recommendation = "No speakers remaining in the list."
@@ -921,7 +921,7 @@ async def refine_speakers(search_query: SearchQuery):
 
         if action_result["action_type"] == "ui_modification":
             # Handle UI modifications (remove, reorder, etc.)
-            return await _handle_ui_modification(action_result, start_time, search_query.original_search_query)
+            return await _handle_ui_modification(action_result, start_time, search_query.enhanced_query)
 
         elif action_result["action_type"] == "new_search":
             # Handle new search with refined criteria
