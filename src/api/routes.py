@@ -577,6 +577,7 @@ async def search_speakers(search_query: SearchQuery):
                 candidate.get("speaker_id")
                 or candidate.get("id")
                 or candidate.get("metadata", {}).get("speaker_id")
+                or candidate.get("metadata", {}).get("id")
                 or "unknown"
             )
 

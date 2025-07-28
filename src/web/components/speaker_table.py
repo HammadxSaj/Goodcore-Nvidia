@@ -32,7 +32,7 @@ def display_speaker_table(speakers: List[Dict[str, Any]]):
         table_data.append(
             {
                 "Rank": i,
-                #"Speaker ID": speaker.get("speaker_id", ""),
+                "Speaker ID": speaker.get("speaker_id", "") or speaker.get("id", ""),
                 "Name": speaker.get("name", ""),
                 "Job Title": speaker.get("job_title", ""),
                 #"Company": speaker.get("company", "N/A"),
@@ -80,7 +80,8 @@ def display_speaker_table(speakers: List[Dict[str, Any]]):
             col1, col2 = st.columns([1, 1])
 
             with col1:
-                st.write("**Speaker ID:**", speaker.get("id", "N/A"))
+                speaker_id =speaker.get("speaker_id")
+                st.write("**Speaker ID:**", speaker_id)
                 st.write("**Company:**", speaker.get("company", "N/A"))
                 st.write("**Center/Location:**", speaker.get("centers", "N/A"))
                 st.write("**Target Audiences:**", speaker.get("audiences", "N/A"))
