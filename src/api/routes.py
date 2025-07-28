@@ -34,6 +34,7 @@ class SearchQuery(BaseModel):
     max_results: int = 10
     conversation_history: Optional[List[Dict[str, str]]] = None
     current_speakers: Optional[List[Dict[str, Any]]] = None
+    original_search_query: Optional[str] = None
 
 
 class SpeakerResult(BaseModel):
@@ -391,7 +392,7 @@ def _convert_list_to_string(value) -> str:
 
 
 async def _handle_ui_modification(
-    action_result: Dict[str, Any], start_time: datetime
+    action_result: Dict[str, Any], start_time: datetime, original_search_query: Optional[str] = None
 ) -> SearchResponse:
     """Handle UI modifications like removing speakers with LLM-generated recommendations"""
 
@@ -415,17 +416,7 @@ async def _handle_ui_modification(
     for speaker_dict in filtered_speaker_dicts:
         try:
             speaker_result = SpeakerResult(
-                speaker_id=str(speaker_dict.get("speaker_id", "unknown")),
-                name=speaker_dict.get("name", "Unknown"),
-                job_title=speaker_dict.get("job_title", ""),
-                company=speaker_dict.get("company"),
-                speaking_topics=speaker_dict.get("speaking_topics", []),
-                bio=speaker_dict.get("bio", ""),
-                specializations=speaker_dict.get("specializations", ""),
-                audiences=speaker_dict.get("audiences", ""),
-                centers=speaker_dict.get("centers", ""),
-                similarity_score=speaker_dict.get("similarity_score", 0.0),
-                rerank_score=speaker_dict.get("rerank_score"),
+                **speaker_dict,  # Unpack the dict directly into the model
             )
             updated_speakers.append(speaker_result)
         except Exception as e:
@@ -434,13 +425,16 @@ async def _handle_ui_modification(
 
     # Generate new recommendation using LLM if we have speakers
     recommendation = ""
-    explanation = f"Updated the speaker list as requested. {len(updated_speakers)} speakers remaining."
+    explanation = action_result.get(
+        "reasoning",
+        f"Updated the speaker list as requested. {len(updated_speakers)} speakers remaining.",
+    )
 
     if updated_speakers:
         # Use LLM to generate a natural recommendation
         recommendation = await _generate_recommendation_with_llm(
-            [speaker.__dict__ for speaker in updated_speakers],
-            action_result.get("original_query", "speaker search"),
+            [speaker.model_dump() for speaker in updated_speakers],
+            original_search_query or action_result.get("original_query", "speaker search"),
         )
     else:
         recommendation = "No speakers remaining in the list."
@@ -927,7 +921,7 @@ async def refine_speakers(search_query: SearchQuery):
 
         if action_result["action_type"] == "ui_modification":
             # Handle UI modifications (remove, reorder, etc.)
-            return await _handle_ui_modification(action_result, start_time)
+            return await _handle_ui_modification(action_result, start_time, search_query.original_search_query)
 
         elif action_result["action_type"] == "new_search":
             # Handle new search with refined criteria
