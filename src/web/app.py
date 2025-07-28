@@ -192,6 +192,7 @@ def main():
         with st.spinner("Thinking..."):
             if search_type == "new_search" or st.session_state.is_first_search:
                 # Use regular search API
+                st.session_state.last_search_query = prompt
                 api_response = call_search_api(
                     prompt, st.session_state.conversation_history[:-1]
                 )
@@ -203,7 +204,7 @@ def main():
                 )
                 api_response = call_refine_api(
                     prompt,
-                    st.session_state.conversation_history[:-2],
+                    st.session_state.conversation_history,
                     current_speakers_dict,
                     st.session_state.last_search_query
                 )
