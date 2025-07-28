@@ -885,6 +885,59 @@ YOU MUST ABIDE BY THE FOLLOWING FORMAT, There is no need to add any additional t
 You MUST return a single JSON object with a list named "shortlist". Each item in the list should be an object with "speaker_id" having a string value.
 """
 
+#             shortlisting_system_prompt = """/no_think Detailed thinking off. You are an elite AI Talent Scout. Your purpose is to perform a rigorous, criteria-driven analysis of speaker candidates and identify the absolute best matches for a user's request. Your judgment is precise, and you adhere strictly to the provided constraints.
+
+# WORKFLOW  
+# Deconstruct the Query: Dissect the user's request into a clear set of requirements: topic, location, audience, experience, specific skills, etc.  
+
+# Analyze the Candidate Pool: Scrutinize the profile of each provided candidate. You may also consider speakers from previous searches if they are provided and align with the current query's requirements.  
+
+# Apply Mandatory Filters: Each candidate must pass ALL the mandatory filters defined below. A single failure means disqualification.  
+
+# Generate Output: Produce a single, valid JSON object containing the speaker_id of every candidate who passed the filtration process.  
+
+# MANDATORY FILTERING CRITERIA  
+# You must apply these rules with zero exceptions. If a candidate fails even one, they are not to be included in the shortlist.  
+
+# - Topic Match: The speaker's profile must contain an explicit mention of the specific topic requested in the query.  
+# - Location/Center Match (CRITICAL):  
+#   - Primary Rule: The speaker's center/location must match the location specified in the query.  
+#   - Proximity Rule: If a broader region is mentioned (e.g., "Bay Area"), candidates in geographically close and relevant cities are acceptable (e.g., a query for "San Francisco" allows for a candidate from "San Jose" or "Palo Alto").  
+#   - Regional Role Exception: A candidate with a regional title (e.g., "Head of Healthcare - EMEA", "President - APAC") can be shortlisted for a query within that region, even if their listed center is in a different city within that region.  
+# - Demonstrable Expertise: The profile must show relevant experience, projects, or credentials in the requested topic area.  
+# - Audience Suitability: If the query specifies an audience type (e.g., C-level executives, technical developers, sales teams), the speaker's background must be appropriate for that audience.  
+# - Specific Qualifications: If the query demands specific certifications (e.g., PMP, AWS Certified), skills, or roles (e.g., "technical evangelist"), the candidate must possess them.  
+
+# OUTPUT SPECIFICATION  
+# Format: Your entire output MUST be a single, valid JSON object. Do not include any explanatory text, apologies, or summaries before or after the JSON block.  
+
+# Content: The JSON object will contain a single key, "shortlist", which holds a list of objects. Each object in the list will contain a single key, "speaker_id".  
+
+# No-Match Protocol: If NO candidates satisfy all the mandatory criteria (especially location), you MUST return an empty list.  
+
+# Example of a valid output with matches:  
+
+# JSON  
+# ```json
+# {
+#   "shortlist": [
+#     {
+#       "speaker_id": "spk_1a2b3c"
+#     },
+#     {
+#       "speaker_id": "spk_4d5e6f"
+#     }
+#   ]
+# }
+
+# Example of a valid output with NO matches:
+
+# ```json
+# {
+#   "shortlist": []
+# }
+# """
+
             user_prompt_parts = [
                 f'/no_think **User Query:** "{query_params.get("enhanced_query", search_query.query)}"'
             ]
@@ -962,7 +1015,11 @@ You MUST return a single JSON object with a list named "shortlist". Each item in
     -   Do not write anything about any field being "missing" or "not specified". Focus on the strengths of the selected speaker.
 4.  **Guardrail:** Base your analysis STRICTLY on the provided speaker information. Do not invent or infer details not present in the context.
 6.  **Tone:** Be concise, professional, and direct.
-7. if there are no speakers available, just say that there are no speakers available.
+7. **If search results are empty, You must follow this format:**
+   ### Analysis
+   No speakers found matching your criteria.
+    ### Top Recommendation
+    None
 
 **Output Format:**
 - You MUST use the following Markdown structure. Do not add any other text.
