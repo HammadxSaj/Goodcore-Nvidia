@@ -228,6 +228,11 @@ def main():
                 st.session_state.last_query_analysis = api_response.get(
                     "query_analysis", {}
                 )
+
+                if st.session_state.last_query_analysis.get("enhanced_query"):
+                    st.session_state.last_enhanced_query = st.session_state.last_query_analysis[
+                        "enhanced_query"
+                    ]
                 st.session_state.last_explanation = api_response.get(
                     "explanation", "Here are the speakers I found."
                 )
