@@ -238,7 +238,6 @@ async def _process_refinement_action(
 ) -> Dict[str, Any]:
     """Use LLM to analyze refinement query and determine action type"""
 
-    # Create speaker context
     speaker_context = "\n".join(
         [
             f"Speaker {i+1}: ID={speaker.get('speaker_id', 'unknown')}, Name={speaker.get('name', 'Unknown')}"
@@ -249,40 +248,38 @@ async def _process_refinement_action(
     conversation_context = "\n".join(
         [
             f"{msg['role'].title()}: {msg['content']}"
-            for msg in conversation_history[-1:] # Only use the last message for context
+            for msg in conversation_history[-1:]
         ]
     )
 
-    system_prompt = """ /no_think Detailed thinking off. You are a conversational refinement processor for a speaker search system. 
+    system_prompt = """/no_think Detailed thinking off. You are a conversational refinement processor for a speaker search system.
 
-**IMPORTANT: Focus ONLY on the current user query, not previous conversation history.**
+**IMPORTANT: Focus ONLY on the current user query.**
 
 **Action Types:**
-1. **ui_modification** - Simple list operations (remove specific speakers, reorder, clear all)
-2. **new_search** - Search refinements that require new database queries (filter by location, add criteria, etc.)
+1.  **ui_modification**: For requests to remove speakers from the current list.
+2.  **new_search**: For requests that add new criteria and require a new search.
 
 **Instructions:**
-1. **ONLY analyze the CURRENT user request** - ignore previous requests in conversation history
-2. **Look at the current speaker list** to see who is actually available to remove/modify
-3. For removal requests: identify the speaker by name matching (case-insensitive, partial matching allowed)
-4. For UI modifications: specify exactly which speakers to keep by their speaker_id (after removing the specified speaker), you must ensure that all the speakers specified are actually in the current speaker list and they are not removed. There IDs must be present in the current speakers to keep list.
-5. For new searches: Just return "new_search" with no modifications or details.
+1.  **Analyze ONLY the CURRENT user request.**
+2.  **For removal requests**:
+    -   Identify the speaker(s) to remove by name (case-insensitive, partial matching allowed).
+    -   Your JSON output's `details` object MUST contain a `speakers_to_remove` list with the exact `speaker_id`(s) of the identified
+speaker(s).
+    -   If the requested speaker is not in the current list, return an empty `speakers_to_remove` list and explain why in the `reasoning`.
+3.  **For new searches**: Return `{"action_type": "new_search"}`.
 
 **Output JSON Format:**
 {
   "action_type": "ui_modification" | "new_search",
-  "reasoning": "Explain the action taken in 1-2 sentences", //For ui_modification only
+  "reasoning": "Explain the action taken in 1-2 sentences.",
   "details": {
-    // For ui_modification:
-    "speakers_to_keep": ["speaker_id1", "speaker_id2"], // You must ensure that all speaker_ids are actually in the current speaker list. Make sure to write the speaker_id as it is.
-    //Make sure that the speakers to keep is a list of strings, each string is a speaker_id of the speaker to keep, eg. ["speaker_id1", "speaker_id2", .....]
-    "preserve_relevant_speakers": true
+    "speakers_to_remove": ["speaker_id_to_remove_1", "speaker_id_to_remove_2"]
   }
 }
 
-**CRITICAL**: When processing removal requests, only consider speakers that are actually in the current speaker list. If a speaker name is not found, keep all current speakers and explain in reasoning.
-
-The response must be valid JSON and contain all required fields. Do not include any additional text or explanations outside the JSON format or before it. Just focus on returning the JSON object as specified.
+**CRITICAL**: Your primary job for UI modifications is to identify the IDs of speakers to be removed. Do not add any other fields to the
+details object.
 """
 
     user_prompt = f"""/no_think **CURRENT REQUEST ONLY:** "{query}"
@@ -293,12 +290,8 @@ The response must be valid JSON and contain all required fields. Do not include 
 **Previous Context (for reference only, do NOT act on these):**
 {conversation_context}
 
-Analyze ONLY the current request "{query}" and determine the appropriate action based on the current speaker list. The response must be valid JSON and contain all required fields. Do not include any additional text or explanations outside the JSON format or before it. Just focus on returning the JSON object as specified.
+Analyze ONLY the current request "{query}" and determine the appropriate action. The response must be valid JSON.
 """
-    
-    print(f"Processing refinement action for query: {query}")
-    print(f"Conversation history: {conversation_history}")
-    print(f"Current speakers: {current_speakers}")
 
     try:
         response = await generate_llm_response(
@@ -309,13 +302,9 @@ Analyze ONLY the current request "{query}" and determine the appropriate action 
             temperature=0.1,
         )
 
-        print("-------------------------Here is the response-------------------------")
-        print(f"LLM response: {response.content.strip()}")
-
         if response.success and response.content:
             try:
                 result = json.loads(response.content.strip())
-                # Add original data for context
                 result["original_speakers"] = current_speakers
                 result["original_query"] = query
                 return result
@@ -392,32 +381,28 @@ def _convert_list_to_string(value) -> str:
 
 
 async def _handle_ui_modification(
-    action_result: Dict[str, Any], start_time: datetime, enhanced_query: Optional[str] = None
+    action_result: Dict[str, Any],
+    start_time: datetime,
+    enhanced_query: Optional[str] = None,
 ) -> SearchResponse:
     """Handle UI modifications like removing speakers with LLM-generated recommendations"""
 
     details = action_result.get("details", {})
-    speakers_to_keep_ids = details.get("speakers_to_keep", [])
+    speakers_to_remove_ids = set(details.get("speakers_to_remove", []))
     original_speakers = action_result.get("original_speakers", [])
 
-    # Create a mapping of speaker_id to speaker for quick lookup
-    speaker_map = {
-        str(speaker.get("speaker_id")): speaker for speaker in original_speakers
-    }
-
-    # Filter and reorder speakers based on LLM decision - PRESERVE ORDER
-    filtered_speaker_dicts = []
-    for speaker_id in speakers_to_keep_ids:  # Iterate in the order specified by LLM
-        if speaker_id in speaker_map:
-            filtered_speaker_dicts.append(speaker_map[speaker_id])
+    # Filter the list by EXCLUDING the speakers to remove
+    filtered_speaker_dicts = [
+        speaker
+        for speaker in original_speakers
+        if str(speaker.get("speaker_id")) not in speakers_to_remove_ids
+    ]
 
     # Convert to SpeakerResult objects
     updated_speakers = []
     for speaker_dict in filtered_speaker_dicts:
         try:
-            speaker_result = SpeakerResult(
-                **speaker_dict,  # Unpack the dict directly into the model
-            )
+            speaker_result = SpeakerResult(**speaker_dict)
             updated_speakers.append(speaker_result)
         except Exception as e:
             logger.warning(f"Could not convert speaker to SpeakerResult: {e}")
@@ -431,7 +416,6 @@ async def _handle_ui_modification(
     )
 
     if updated_speakers:
-        # Use LLM to generate a natural recommendation
         recommendation = await _generate_recommendation_with_llm(
             [speaker.model_dump() for speaker in updated_speakers],
             enhanced_query or action_result.get("original_query", "speaker search"),
@@ -450,6 +434,7 @@ async def _handle_ui_modification(
         total_results=len(updated_speakers),
         search_time_ms=search_time,
     )
+
 
 @router.get("/health")
 async def health_check():

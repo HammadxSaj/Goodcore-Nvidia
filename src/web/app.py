@@ -167,7 +167,7 @@ def main():
             st.markdown(st.session_state.last_explanation)
         if st.session_state.last_recommendation:
             st.info(
-                f"**⭐ Top Recommendation:** {st.session_state.last_recommendation}"
+                f"**⭐ Top Recommendation:**  {st.session_state.last_recommendation}"
             )
 
         display_speaker_table(st.session_state.displayed_speakers)
@@ -193,7 +193,7 @@ def main():
             if search_type == "new_search" or st.session_state.is_first_search:
                 # Use search API for new searches
                 api_response = call_search_api(
-                    prompt, st.session_state.conversation_history[:-1]
+                    prompt, st.session_state.conversation_history
                 )
                 st.session_state.is_first_search = False
             else:
@@ -212,7 +212,7 @@ def main():
         if api_response:
             # Check for a structured error from the backend
             if api_response.get("error"):
-                response_content = f"❌ {api_response.get('message', 'I can only help with speaker-related queries.')}"
+                response_content = f"❌  {api_response.get('message', 'I can only help with speaker-related queries.')}"
                 if api_response.get("suggestion"):
                     response_content += (
                         f"\n\n**Suggestion:** {api_response.get('suggestion')}"
@@ -229,10 +229,15 @@ def main():
                     "query_analysis", {}
                 )
 
-                if st.session_state.last_query_analysis.get("enhanced_query"):
-                    st.session_state.last_enhanced_query = st.session_state.last_query_analysis[
-                        "enhanced_query"
-                    ]
+                # FIX: Correctly update enhanced_query only after a new search
+                if search_type == "new_search":
+                    print("api_response:", api_response)
+                    query_analysis = api_response.get("query_analysis", {})
+                    if query_analysis.get("enhanced_query"):
+                        st.session_state.last_enhanced_query = query_analysis[
+                            "enhanced_query"
+                        ]
+
                 st.session_state.last_explanation = api_response.get(
                     "explanation", "Here are the speakers I found."
                 )
