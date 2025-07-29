@@ -159,15 +159,16 @@ def main():
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Display the current speaker results if they exist
+    # Display the current speaker results if they exist and if recommendation is not null ""
     if st.session_state.displayed_speakers:
-        st.markdown("---")
-        st.subheader("Current Speaker Recommendations")
-        if st.session_state.last_explanation:
-            st.markdown(st.session_state.last_explanation)
-        if st.session_state.last_recommendation:
-            st.info(
-                f"**⭐ Top Recommendation:**  {st.session_state.last_recommendation}"
+        if st.session_state.last_recommendation != "":
+            st.markdown("---")
+            st.subheader("Current Speaker Recommendations")
+            if st.session_state.last_explanation:
+                st.markdown(st.session_state.last_explanation)
+            if st.session_state.last_recommendation:
+                st.info(
+                    f"**⭐ Top Recommendation:**  {st.session_state.last_recommendation}"
             )
 
         display_speaker_table(st.session_state.displayed_speakers)
@@ -231,7 +232,6 @@ def main():
 
                 # FIX: Correctly update enhanced_query only after a new search
                 if search_type == "new_search":
-                    print("api_response:", api_response)
                     query_analysis = api_response.get("query_analysis", {})
                     if query_analysis.get("enhanced_query"):
                         st.session_state.last_enhanced_query = query_analysis[

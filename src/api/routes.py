@@ -416,10 +416,13 @@ async def _handle_ui_modification(
     )
 
     if updated_speakers:
-        recommendation = await _generate_recommendation_with_llm(
-            [speaker.model_dump() for speaker in updated_speakers],
-            enhanced_query or action_result.get("original_query", "speaker search"),
-        )
+        # recommendation = await _generate_recommendation_with_llm(
+        #     [speaker.model_dump() for speaker in updated_speakers],
+        #     enhanced_query or action_result.get("original_query", "speaker search"),
+        # )
+
+        recommendation = ""
+        
     else:
         recommendation = "No speakers remaining in the list."
         explanation = "All speakers have been removed from the list."
