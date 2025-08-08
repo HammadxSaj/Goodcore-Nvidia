@@ -478,36 +478,47 @@ class VectorDatabase:
                 return {"success": True, "candidates": [], "total_found": 0, "search_type": "no_results"}
 
             # Step 4: Reranking
-            if candidates:
-                logger.info(f"🎯 Reranking {len(candidates)} candidates...")
-                try:
-                    rerank_response = await nvidia_client.rerank_results(
-                        query=query_text,
-                        candidates=candidates,
-                        top_k=limit
-                    )
-                    if rerank_response.success:
-                        logger.info(f"✅ Reranking successful, returning  {len(rerank_response.rankings)} results")
-                        return {
-                            "success": True,
-                            "candidates": rerank_response.rankings,
-                            "total_found": len(rerank_response.rankings),
-                            "search_type": "hybrid_vector_bm25_reranked"
-                        }
-                    else:
-                        logger.warning(f"Reranking failed: {rerank_response.error}")
-                except Exception as e:
-                    logger.error(f"Error in reranking: {e}")
+            # if candidates:
+            #     logger.info(f"🎯 Reranking {len(candidates)} candidates...")
+            #     try:
+            #         rerank_response = await nvidia_client.rerank_results(
+            #             query=query_text,
+            #             candidates=candidates,
+            #             top_k=limit
+            #         )
+            #         if rerank_response.success:
+            #             logger.info(f"✅ Reranking successful, returning  {len(rerank_response.rankings)} results")
+            #             return {
+            #                 "success": True,
+            #                 "candidates": rerank_response.rankings,
+            #                 "total_found": len(rerank_response.rankings),
+            #                 "search_type": "hybrid_vector_bm25_reranked"
+            #             }
+            #         else:
+            #             logger.warning(f"Reranking failed: {rerank_response.error}")
+            #     except Exception as e:
+            #         logger.error(f"Error in reranking: {e}")
 
-                logger.info("📋 Returning fused results without reranking")
+            #     logger.info("📋 Returning fused results without reranking")
+            #     return {
+            #         "success": True,
+            #         "candidates": candidates[:limit],
+            #         "total_found": len(candidates),
+            #         "search_type": "hybrid_vector_bm25_no_rerank"
+            #     }
+
+            # return {"success": True, "candidates": [], "total_found": 0, "search_type": "no_candidates"}
+
+            #step 4: Return top 10 candidates directly
+
+            if candidates:
+                logger.info(f"📋 Returning top {min(10, len(candidates))} fused results without reranking")
                 return {
                     "success": True,
-                    "candidates": candidates[:limit],
-                    "total_found": len(candidates),
+                    "candidates": candidates[:10],  # Return top 10 directly
+                    "total_found": len(candidates[:10]),
                     "search_type": "hybrid_vector_bm25_no_rerank"
                 }
-
-            return {"success": True, "candidates": [], "total_found": 0, "search_type": "no_candidates"}
 
         except Exception as e:
             logger.error(f"Error in hybrid search: {e}")
